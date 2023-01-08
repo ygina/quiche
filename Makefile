@@ -53,3 +53,7 @@ clean:
 		echo ">> Removing $$id"; \
 		$(DOCKER) rmi -f $$id; \
 	done
+
+.PHONY: sidecar
+sidecar:
+	cargo build --package quiche --release --features ffi,pkg-config-meta,qlog
