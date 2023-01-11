@@ -1246,11 +1246,20 @@ impl Connection {
             },
         };
 
+        // NOTE(gina): curl calls this function with a very large body, so
+        // quiche almost always sends a STREAM_DATA_BLOCKED frame. I don't
+        // think the peer can do much with this frame and 19.13 of
+        // https://datatracker.ietf.org/doc/html/draft-ietf-quic-transport-23
+        // only says the sender *should* send STREAM_DATA_BLOCKED when it wishes
+        // to send data but is unable to due to stream-level flow control. So
+        // I'm removing this check to greatly reduce the number of packets sent.
+        /*
         if stream_cap < overhead + body.len() {
             // Ensure the peer is notified that the connection or stream is
             // blocked when the stream's capacity is limited by flow control.
             let _ = conn.stream_writable(stream_id, overhead + body.len());
         }
+        */
 
         // Make sure there is enough capacity to send the DATA frame header.
         if stream_cap < overhead {
