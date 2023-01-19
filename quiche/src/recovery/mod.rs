@@ -1173,6 +1173,8 @@ impl std::fmt::Debug for Recovery {
 
 #[derive(Clone)]
 pub struct Sent {
+    pub sidecar_id: u32,
+
     pub pkt_num: u64,
 
     pub frames: Vec<frame::Frame>,

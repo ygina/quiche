@@ -4032,7 +4032,13 @@ impl Connection {
             aead,
         )?;
 
+        // The sidecar identifier is the first 4 bytes = 32 bits of the
+        // encrypted QUIC payload following the short header.
+        let sidecar_id = u32::from_be_bytes(
+            [out[21], out[22], out[23], out[24]]);
+
         let sent_pkt = recovery::Sent {
+            sidecar_id,
             pkt_num: pn,
             frames,
             time_sent: now,
