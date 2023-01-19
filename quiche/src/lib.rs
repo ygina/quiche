@@ -678,6 +678,9 @@ pub struct Config {
     max_stream_window: u64,
 
     disable_dcid_reuse: bool,
+
+    sidecar_iface: String,
+    sidecar_threshold: usize,
 }
 
 // See https://quicwg.org/base-drafts/rfc9000.html#section-15
@@ -736,6 +739,9 @@ impl Config {
             max_stream_window: stream::MAX_STREAM_WINDOW,
 
             disable_dcid_reuse: false,
+
+            sidecar_iface: String::from(""),
+            sidecar_threshold: 0,
         })
     }
 
@@ -1066,6 +1072,16 @@ impl Config {
     /// The default value is `CongestionControlAlgorithm::CUBIC`.
     pub fn set_cc_algorithm(&mut self, algo: CongestionControlAlgorithm) {
         self.cc_algorithm = algo;
+    }
+
+    /// Sets the sidecar interface that packets are sent on.
+    pub fn set_sidecar_iface(&mut self, iface: String) {
+        self.sidecar_iface = iface;
+    }
+
+    /// Sets the sidecar quACK threshold.
+    pub fn set_sidecar_threshold(&mut self, threshold: usize) {
+        self.sidecar_threshold = threshold;
     }
 
     /// Configures whether to enable HyStart++.

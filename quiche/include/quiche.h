@@ -209,6 +209,12 @@ enum quiche_cc_algorithm {
 // Sets the congestion control algorithm used.
 void quiche_config_set_cc_algorithm(quiche_config *config, enum quiche_cc_algorithm algo);
 
+// Sets the sidecar interface that packets are sent on.
+void quiche_config_set_sidecar_iface(quiche_config *config, const char *iface);
+
+// Sets the sidecar quACK threshold.
+void quiche_config_set_sidecar_threshold(quiche_config *config, size_t threshold);
+
 // Configures whether to use HyStart++.
 void quiche_config_enable_hystart(quiche_config *config, bool v);
 
@@ -274,14 +280,6 @@ ssize_t quiche_retry(const uint8_t *scid, size_t scid_len,
 
 // Returns true if the given protocol version is supported.
 bool quiche_version_is_supported(uint32_t version);
-
-quiche_conn *quiche_conn_new_with_sc_tls(const char *iface, size_t threshold,
-                                         const uint8_t *scid, size_t scid_len,
-                                         const uint8_t *odcid, size_t odcid_len,
-                                         const struct sockaddr *local, size_t local_len,
-                                         const struct sockaddr *peer, size_t peer_len,
-                                         quiche_config *config, void *ssl,
-                                         bool is_server);
 
 quiche_conn *quiche_conn_new_with_tls(const uint8_t *scid, size_t scid_len,
                                       const uint8_t *odcid, size_t odcid_len,

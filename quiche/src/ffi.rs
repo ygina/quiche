@@ -328,6 +328,21 @@ pub extern fn quiche_config_set_cc_algorithm(
 }
 
 #[no_mangle]
+pub extern fn quiche_config_set_sidecar_iface(
+    config: &mut Config, iface: *const c_char,
+) {
+    let iface = unsafe { ffi::CStr::from_ptr(iface).to_str().unwrap() };
+    config.set_sidecar_iface(iface.to_string());
+}
+
+#[no_mangle]
+pub extern fn quiche_config_set_sidecar_threshold(
+    config: &mut Config, threshold: size_t,
+) {
+    config.set_sidecar_threshold(threshold);
+}
+
+#[no_mangle]
 pub extern fn quiche_config_enable_hystart(config: &mut Config, v: bool) {
     config.enable_hystart(v);
 }
@@ -554,24 +569,6 @@ pub extern fn quiche_retry(
 
         Err(e) => e.to_c(),
     }
-}
-
-#[no_mangle]
-pub extern fn quiche_conn_new_with_sc_tls(
-    iface: *const c_char, threshold: size_t,
-    scid: *const u8, scid_len: size_t, odcid: *const u8, odcid_len: size_t,
-    local: &sockaddr, local_len: socklen_t, peer: &sockaddr, peer_len: socklen_t,
-    config: &mut Config, ssl: *mut c_void, is_server: bool,
-) -> *mut Connection {
-    if iface.is_null() {
-        return ptr::null_mut();
-    }
-    let iface = unsafe { ffi::CStr::from_ptr(iface).to_str().unwrap() };
-    // println!("iface={} threshold={}", iface, threshold);
-    // TODO
-    quiche_conn_new_with_tls(scid, scid_len, odcid, odcid_len,
-                             local, local_len, peer, peer_len,
-                             config, ssl, is_server)
 }
 
 #[no_mangle]
