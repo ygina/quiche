@@ -44,6 +44,8 @@ use crate::ranges;
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
 
+use quack::Quack;
+
 // Loss Recovery
 const INITIAL_PACKET_THRESHOLD: u64 = 3;
 
@@ -166,6 +168,8 @@ pub struct Recovery {
 
     /// How many non-ack-eliciting packets have been sent.
     outstanding_non_ack_eliciting: usize,
+
+    quack: Quack,
 }
 
 pub struct RecoveryConfig {
@@ -174,6 +178,8 @@ pub struct RecoveryConfig {
     cc_ops: &'static CongestionControlOps,
     hystart: bool,
     pacing: bool,
+    sidecar_iface: String,
+    sidecar_threshold: usize,
 }
 
 impl RecoveryConfig {
@@ -184,6 +190,8 @@ impl RecoveryConfig {
             cc_ops: config.cc_algorithm.into(),
             hystart: config.hystart,
             pacing: config.pacing,
+            sidecar_iface: config.sidecar_iface.clone(),
+            sidecar_threshold: config.sidecar_threshold,
         }
     }
 }
@@ -284,6 +292,8 @@ impl Recovery {
             bbr_state: bbr::State::new(),
 
             outstanding_non_ack_eliciting: 0,
+
+            quack: Quack::new(recovery_config.sidecar_threshold),
         }
     }
 
