@@ -275,6 +275,14 @@ ssize_t quiche_retry(const uint8_t *scid, size_t scid_len,
 // Returns true if the given protocol version is supported.
 bool quiche_version_is_supported(uint32_t version);
 
+quiche_conn *quiche_conn_new_with_sc_tls(const char *iface, size_t threshold,
+                                         const uint8_t *scid, size_t scid_len,
+                                         const uint8_t *odcid, size_t odcid_len,
+                                         const struct sockaddr *local, size_t local_len,
+                                         const struct sockaddr *peer, size_t peer_len,
+                                         quiche_config *config, void *ssl,
+                                         bool is_server);
+
 quiche_conn *quiche_conn_new_with_tls(const uint8_t *scid, size_t scid_len,
                                       const uint8_t *odcid, size_t odcid_len,
                                       const struct sockaddr *local, size_t local_len,
@@ -308,6 +316,9 @@ typedef struct {
     struct sockaddr *to;
     socklen_t to_len;
 } quiche_recv_info;
+
+// Processes quACKs received from a sidecar.
+void quiche_conn_recv_quack(quiche_conn *conn, uint8_t *quack_buf, size_t quack_buf_len);
 
 // Processes QUIC packets received from the peer.
 ssize_t quiche_conn_recv(quiche_conn *conn, uint8_t *buf, size_t buf_len,

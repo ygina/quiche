@@ -554,6 +554,24 @@ pub extern fn quiche_retry(
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_new_with_sc_tls(
+    iface: *const c_char, threshold: size_t,
+    scid: *const u8, scid_len: size_t, odcid: *const u8, odcid_len: size_t,
+    local: &sockaddr, local_len: socklen_t, peer: &sockaddr, peer_len: socklen_t,
+    config: &mut Config, ssl: *mut c_void, is_server: bool,
+) -> *mut Connection {
+    if iface.is_null() {
+        return ptr::null_mut();
+    }
+    let iface = unsafe { ffi::CStr::from_ptr(iface).to_str().unwrap() };
+    // println!("iface={} threshold={}", iface, threshold);
+    // TODO
+    quiche_conn_new_with_tls(scid, scid_len, odcid, odcid_len,
+                             local, local_len, peer, peer_len,
+                             config, ssl, is_server)
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_new_with_tls(
     scid: *const u8, scid_len: size_t, odcid: *const u8, odcid_len: size_t,
     local: &sockaddr, local_len: socklen_t, peer: &sockaddr, peer_len: socklen_t,
@@ -699,6 +717,15 @@ impl<'a> From<&RecvInfo<'a>> for crate::RecvInfo {
             to: std_addr_from_c(info.to, info.to_len),
         }
     }
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_recv_quack(
+    conn: &mut Connection, quack_buf: *mut u8, quack_buf_len: size_t,
+) {
+    let buf = unsafe { slice::from_raw_parts_mut(quack_buf, quack_buf_len) };
+    println!("received quack {}", quack_buf_len);
+    // TODO
 }
 
 #[no_mangle]
