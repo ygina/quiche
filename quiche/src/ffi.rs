@@ -100,6 +100,9 @@ use winapi::shared::ws2ipdef::SOCKADDR_IN6_LH_u;
 
 use crate::*;
 
+use bincode;
+use quack::Quack;
+
 #[no_mangle]
 pub extern fn quiche_version() -> *const u8 {
     static VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "\0");
@@ -724,7 +727,8 @@ pub extern fn quiche_conn_recv_quack(
     conn: &mut Connection, quack_buf: *mut u8, quack_buf_len: size_t,
 ) {
     let buf = unsafe { slice::from_raw_parts_mut(quack_buf, quack_buf_len) };
-    println!("received quack {}", quack_buf_len);
+    let quack: Quack = bincode::deserialize(&buf).unwrap();
+    // println!("received quack {} {}", quack_buf_len, quack.count);
     // TODO
 }
 
