@@ -455,7 +455,9 @@ impl Recovery {
             return Ok(());
         }
         if usize::from(missing) > threshold {
-            return Err(crate::Error::SidecarThresholdExceeded);
+            // return Err(crate::Error::SidecarThresholdExceeded);
+            println!("WARNING: threshold exceeded {} > {}", missing, threshold);
+            return Ok(());
         }
         let mut diff_quack = self.quack.clone() - quack;
         let mut coeffs = DecodedQuack::to_coeffs(&diff_quack);
