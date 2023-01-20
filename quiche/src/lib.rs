@@ -377,6 +377,7 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 
 use quack::Quack;
+use sidecar::ID_OFFSET;
 
 /// The current QUIC wire version.
 pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_V1;
@@ -4066,8 +4067,14 @@ impl Connection {
 
         // The sidecar identifier is the first 4 bytes = 32 bits of the
         // encrypted QUIC payload following the short header.
-        let sidecar_id = u32::from_be_bytes(
-            [out[21], out[22], out[23], out[24]]);
+        let ip_hdr_len = 42;
+        let base_index = ID_OFFSET - ip_hdr_len;
+        let sidecar_id = u32::from_be_bytes([
+            out[base_index],
+            out[base_index+1],
+            out[base_index+2],
+            out[base_index+3],
+        ]);
 
         let sent_pkt = recovery::Sent {
             sidecar_id,
