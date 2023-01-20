@@ -489,6 +489,11 @@ impl Recovery {
         let mut indexes = vec![];
         let mut in_suffix = true;
         let mut suffix = 0;
+        // TODO(gina): truncate packets in the prefix of the log that have been
+        // received, since they will always be received in the future as well.
+        // TODO(gina): if we suspect a large number of missing packets are in
+        // the suffix, we can cheat the threshold and "remove" packets from our
+        // own quack before calculating the difference quack.
         for (i, (id, _epoch)) in self.log.iter().enumerate().rev() {
             if MonicPolynomialEvaluator::eval(&coeffs, *id).is_zero() {
                 if in_suffix {
@@ -504,11 +509,11 @@ impl Recovery {
         }
 
         println!(
-            "found {}/{} missing ({} received) ({} suffix) {:?}",
-            indexes.len() + suffix,
+            "found {}+{}/{} missing ({} received) {:?}",
+            indexes.len(),
+            suffix,
             missing,
             received,
-            suffix,
             indexes,
         );
         Ok(())
