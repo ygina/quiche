@@ -171,6 +171,7 @@ pub struct Recovery {
 
     sidecar: bool,
     quack: Quack,
+    last_decoded_quack: Quack,
     log: Vec<u32>,
 }
 
@@ -298,6 +299,8 @@ impl Recovery {
             sidecar: recovery_config.sidecar_threshold > 0,
 
             quack: Quack::new(recovery_config.sidecar_threshold),
+
+            last_decoded_quack: Quack::new(recovery_config.sidecar_threshold),
 
             log: vec![],
         }
@@ -436,6 +439,11 @@ impl Recovery {
     }
 
     pub fn on_quack_received(&mut self, quack: Quack) -> Result<()> {
+        if self.last_decoded_quack.count == quack.count {
+            return Ok(());
+        } else{
+            self.last_decoded_quack.count = quack.count;
+        }
         if self.quack.count < quack.count {
             return Err(crate::Error::SidecarInvalidQuack);
         }
