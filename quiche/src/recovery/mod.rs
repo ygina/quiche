@@ -169,6 +169,7 @@ pub struct Recovery {
     /// How many non-ack-eliciting packets have been sent.
     outstanding_non_ack_eliciting: usize,
 
+    sidecar: bool,
     quack: Quack,
 }
 
@@ -293,6 +294,8 @@ impl Recovery {
 
             outstanding_non_ack_eliciting: 0,
 
+            sidecar: recovery_config.sidecar_threshold > 0,
+
             quack: Quack::new(recovery_config.sidecar_threshold),
         }
     }
@@ -383,6 +386,10 @@ impl Recovery {
         // bytes_in_flight is already updated. Use previous value.
         self.delivery_rate
             .on_packet_sent(&mut pkt, self.bytes_in_flight - sent_bytes);
+
+        if self.sidecar {
+            self.quack.insert(pkt.sidecar_id);
+        }
 
         self.sent[epoch].push_back(pkt);
 
