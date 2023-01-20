@@ -528,6 +528,12 @@ pub enum Error {
 
     /// Sidecar is enabled while there are multiple paths.
     SidecarMultiplePaths,
+
+    /// Received a quACK that has processed more packets than we have sent.
+    SidecarInvalidQuack,
+
+    /// Received a quACK where the difference exceeds our threshold.
+    SidecarThresholdExceeded,
 }
 
 impl Error {
@@ -566,6 +572,8 @@ impl Error {
             Error::IdLimit => -17,
             Error::OutOfIdentifiers => -18,
             Error::SidecarMultiplePaths => -19,
+            Error::SidecarInvalidQuack => -20,
+            Error::SidecarThresholdExceeded => -21,
         }
     }
 }

@@ -44,7 +44,7 @@ use crate::ranges;
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
 
-use quack::Quack;
+use quack::{DecodedQuack, Quack};
 
 // Loss Recovery
 const INITIAL_PACKET_THRESHOLD: u64 = 3;
@@ -171,6 +171,7 @@ pub struct Recovery {
 
     sidecar: bool,
     quack: Quack,
+    log: Vec<u32>,
 }
 
 pub struct RecoveryConfig {
@@ -297,6 +298,8 @@ impl Recovery {
             sidecar: recovery_config.sidecar_threshold > 0,
 
             quack: Quack::new(recovery_config.sidecar_threshold),
+
+            log: vec![],
         }
     }
 
@@ -389,6 +392,7 @@ impl Recovery {
 
         if self.sidecar {
             self.quack.insert(pkt.sidecar_id);
+            self.log.push(pkt.sidecar_id);
         }
 
         self.sent[epoch].push_back(pkt);
@@ -432,7 +436,25 @@ impl Recovery {
     }
 
     pub fn on_quack_received(&mut self, quack: Quack) -> Result<()> {
-        println!("{} - {}", self.quack.count, quack.count);
+        if self.quack.count < quack.count {
+            return Err(crate::Error::SidecarInvalidQuack);
+        }
+        let threshold = self.quack.power_sums.len();
+        let received = quack.count;
+        let missing = self.quack.count - quack.count;
+        if usize::from(missing) > threshold {
+            return Err(crate::Error::SidecarThresholdExceeded);
+        }
+        let diff_quack = self.quack.clone() - quack;
+        let decoded_quack = DecodedQuack::decode(diff_quack, self.log.clone());
+        println!(
+            "found {}/{} missing ({} received) ({} suffix) {:?}",
+            decoded_quack.total_num_missing(),
+            missing,
+            received,
+            decoded_quack.num_suffix(),
+            decoded_quack.missing(),
+        );
         Ok(())
     }
 
