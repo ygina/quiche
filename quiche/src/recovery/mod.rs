@@ -172,7 +172,7 @@ pub struct Recovery {
     sidecar: bool,
     quack: Quack,
     last_decoded_quack: Quack,
-    log: Vec<u32>,
+    log: Vec<(u32, packet::Epoch)>,
 }
 
 pub struct RecoveryConfig {
@@ -395,7 +395,7 @@ impl Recovery {
 
         if self.sidecar {
             self.quack.insert(pkt.sidecar_id);
-            self.log.push(pkt.sidecar_id);
+            self.log.push((pkt.sidecar_id, epoch));
         }
 
         self.sent[epoch].push_back(pkt);
@@ -450,19 +450,44 @@ impl Recovery {
         let threshold = self.quack.power_sums.len();
         let received = quack.count;
         let missing = self.quack.count - quack.count;
-        if missing == 0 {
+        if missing == 0 || self.log.is_empty() {
             // All packets are accounted for
             return Ok(());
         }
         if usize::from(missing) > threshold {
             return Err(crate::Error::SidecarThresholdExceeded);
         }
-        let diff_quack = self.quack.clone() - quack;
-        let coeffs = DecodedQuack::to_coeffs(&diff_quack);
+        let mut diff_quack = self.quack.clone() - quack;
+        let mut coeffs = DecodedQuack::to_coeffs(&diff_quack);
+
+        // Once we drain packets in the Handshake epoch, we will never return to
+        // the Initial epoch. RFC9000 17.2.2.1 states a client stops both
+        // sending and processing Initial packets when it receives its first
+        // Handshake packet. So we must account for Initial packets in the
+        // quACK if they will never be marked as ACKed or lost.
+        let (_, last_epoch) = self.log[self.log.len() - 1];
+        if last_epoch != packet::Epoch::Initial {
+            for (id, epoch) in &self.log {
+                if epoch != &packet::Epoch::Initial {
+                    break;
+                }
+                if MonicPolynomialEvaluator::eval(&coeffs, *id).is_zero() {
+                    self.quack.remove(*id);
+                    diff_quack.remove(*id);
+                    info!("Removed {:?} {:#10x} from quack", epoch, id);
+                    if diff_quack.count == 0 {
+                        return Ok(());
+                    }
+                    coeffs = DecodedQuack::to_coeffs(&diff_quack);
+                }
+            }
+        }
+
+        // Find remaining missing packets
         let mut indexes = vec![];
         let mut in_suffix = true;
         let mut suffix = 0;
-        for (i, id) in self.log.iter().enumerate().rev() {
+        for (i, (id, _epoch)) in self.log.iter().enumerate().rev() {
             if MonicPolynomialEvaluator::eval(&coeffs, *id).is_zero() {
                 if in_suffix {
                     suffix += 1;
