@@ -2981,6 +2981,7 @@ impl Connection {
         }
 
         // Generate coalesced packets.
+        let mut coalesced = 0;
         while left > 0 {
             let (ty, written) = match self.send_single(
                 &mut out[done..done + left],
@@ -2996,6 +2997,7 @@ impl Connection {
 
             done += written;
             left -= written;
+            coalesced += 1;
 
             match ty {
                 packet::Type::Initial => has_initial = true,
@@ -3047,6 +3049,9 @@ impl Connection {
 
             at: send_path.recovery.get_packet_send_time(),
         };
+        if coalesced >= 2 {
+            warn!("coalesced {} packets from send_single()", coalesced);
+        }
 
         Ok((done, info))
     }
