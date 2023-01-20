@@ -44,7 +44,7 @@ use crate::ranges;
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
 
-use quack::{DecodedQuack, Quack};
+use quack::{DecodedQuack, Quack, arithmetic::MonicPolynomialEvaluator};
 
 // Loss Recovery
 const INITIAL_PACKET_THRESHOLD: u64 = 3;
@@ -450,18 +450,39 @@ impl Recovery {
         let threshold = self.quack.power_sums.len();
         let received = quack.count;
         let missing = self.quack.count - quack.count;
+        if missing == 0 {
+            // All packets are accounted for
+            return Ok(());
+        }
         if usize::from(missing) > threshold {
             return Err(crate::Error::SidecarThresholdExceeded);
         }
         let diff_quack = self.quack.clone() - quack;
-        let decoded_quack = DecodedQuack::decode(diff_quack, self.log.clone());
+        let coeffs = DecodedQuack::to_coeffs(&diff_quack);
+        let mut indexes = vec![];
+        let mut in_suffix = true;
+        let mut suffix = 0;
+        for (i, id) in self.log.iter().enumerate().rev() {
+            if MonicPolynomialEvaluator::eval(&coeffs, *id).is_zero() {
+                if in_suffix {
+                    suffix += 1;
+                } else {
+                    indexes.push(i);
+                }
+            } else {
+                if in_suffix {
+                    in_suffix = false;
+                }
+            }
+        }
+
         println!(
             "found {}/{} missing ({} received) ({} suffix) {:?}",
-            decoded_quack.total_num_missing(),
+            indexes.len() + suffix,
             missing,
             received,
-            decoded_quack.num_suffix(),
-            decoded_quack.missing(),
+            suffix,
+            indexes,
         );
         Ok(())
     }
