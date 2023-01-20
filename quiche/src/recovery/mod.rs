@@ -431,6 +431,11 @@ impl Recovery {
         self.pacer.send(sent_bytes, now);
     }
 
+    pub fn on_quack_received(&mut self, quack: Quack) -> Result<()> {
+        println!("{} - {}", self.quack.count, quack.count);
+        Ok(())
+    }
+
     pub fn on_ack_received(
         &mut self, ranges: &ranges::RangeSet, ack_delay: u64,
         epoch: packet::Epoch, handshake_status: HandshakeStatus, now: Instant,

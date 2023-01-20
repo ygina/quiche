@@ -376,6 +376,8 @@ use std::str::FromStr;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 
+use quack::Quack;
+
 /// The current QUIC wire version.
 pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_V1;
 
@@ -522,6 +524,9 @@ pub enum Error {
 
     /// Not enough available identifiers.
     OutOfIdentifiers,
+
+    /// Sidecar is enabled while there are multiple paths.
+    SidecarMultiplePaths,
 }
 
 impl Error {
@@ -559,6 +564,7 @@ impl Error {
             Error::StreamReset { .. } => -16,
             Error::IdLimit => -17,
             Error::OutOfIdentifiers => -18,
+            Error::SidecarMultiplePaths => -19,
         }
     }
 }
@@ -1951,6 +1957,16 @@ impl Connection {
 
         self.process_peer_transport_params(peer_params)?;
 
+        Ok(())
+    }
+
+    /// Process quACKs received from a sidecar.
+    pub fn recv_quack(&mut self, quack: Quack) -> Result<()> {
+        if self.paths.len() != 1 {
+            return Err(Error::SidecarMultiplePaths);
+        }
+        let path = self.paths.get_active_mut()?;
+        path.recovery.on_quack_received(quack)?;
         Ok(())
     }
 

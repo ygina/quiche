@@ -721,12 +721,15 @@ impl<'a> From<&RecvInfo<'a>> for crate::RecvInfo {
 
 #[no_mangle]
 pub extern fn quiche_conn_recv_quack(
-    conn: &mut Connection, quack_buf: *mut u8, quack_buf_len: size_t,
+    conn: *mut Connection, quack_buf: *mut u8, quack_buf_len: size_t,
 ) {
+    if conn.is_null() {
+        return;
+    }
     let buf = unsafe { slice::from_raw_parts_mut(quack_buf, quack_buf_len) };
     let quack: Quack = bincode::deserialize(&buf).unwrap();
-    // println!("received quack {} {}", quack_buf_len, quack.count);
-    // TODO
+    let conn: &mut Connection = unsafe { &mut *conn };
+    conn.recv_quack(quack).unwrap();
 }
 
 #[no_mangle]
