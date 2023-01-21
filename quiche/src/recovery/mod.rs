@@ -32,6 +32,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use std::collections::VecDeque;
+use std::collections::HashSet;
 
 use crate::Config;
 use crate::Result;
@@ -488,20 +489,20 @@ impl Recovery {
         }
 
         // Find remaining missing packets
-        let mut indexes = vec![];
+        let mut missing_ids = vec![];
         let mut in_suffix = true;
         let mut suffix = 0;
         // TODO(gina): if we suspect a large number of missing packets are in
         // the suffix, we can cheat the threshold and "remove" packets from our
         // own quack before calculating the difference quack.
         let mut first_missing_index = None;
-        for (i, (id, _epoch)) in self.log.iter().enumerate().rev() {
+        for (i, (id, epoch)) in self.log.iter().enumerate().rev() {
             if MonicPolynomialEvaluator::eval(&coeffs, *id).is_zero() {
                 first_missing_index = Some(i);
                 if in_suffix {
                     suffix += 1;
-                } else {
-                    indexes.push(i);
+                } else if epoch == &packet::Epoch::Application {
+                    missing_ids.push(*id);
                 }
             } else {
                 if in_suffix {
@@ -518,14 +519,47 @@ impl Recovery {
 
         println!(
             "found {}+{}/{} missing ({} received) (len(log)={}) {:?}",
-            indexes.len(),
+            missing_ids.len(),
             suffix,
             missing,
             received,
             self.log.len(),
-            indexes,
+            missing_ids.iter().map(|id| format!("{:#10x}", id)).collect::<Vec<_>>(),
         );
-        Ok((0, 0))
+
+        // For packets considered missing (anything not in the suffix), mark it
+        // as lost and add it to self.lost[epoch] for retransmission.
+        let now = Instant::now();
+        let mut lost_bytes = 0;
+        let mut lost_packets = 0;
+        let mut set = missing_ids.into_iter().collect::<HashSet<u32>>();
+        let epoch = packet::Epoch::Application;
+        let unacked_iter = self.sent[epoch]
+            .iter_mut()
+            // .take_while(|p| p.pkt_num <= largest_acked)
+            .filter(|p| p.time_acked.is_none() && p.time_lost.is_none());
+        for unacked in unacked_iter {
+            if set.is_empty() {
+                break;
+            }
+            if set.remove(&unacked.sidecar_id) {
+                self.lost[epoch].append(&mut unacked.frames);
+                unacked.time_lost = Some(now);
+                if unacked.in_flight {
+                    lost_bytes += unacked.size;
+                    // largest_lost_pkt = Some(unacked.clone()
+                    self.in_flight_count[epoch] =
+                        self.in_flight_count[epoch].saturating_sub(1);
+                }
+                lost_packets += 1;
+                self.lost_count += 1;
+                self.quack.remove(unacked.sidecar_id);
+            }
+        }
+        self.bytes_in_flight = self.bytes_in_flight.saturating_sub(lost_bytes);
+        self.bytes_lost += lost_bytes as u64;
+        // TODO: call on_packets_lost() to adjust cwnd?
+        Ok((lost_packets, lost_bytes))
     }
 
     pub fn on_ack_received(
