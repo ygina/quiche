@@ -1013,6 +1013,7 @@ impl Recovery {
 
                 lost_packets += 1;
                 self.lost_count += 1;
+                self.quack.remove(unacked.sidecar_id);
             } else {
                 let loss_time = match self.loss_time[epoch] {
                     None => unacked.time_sent + loss_delay,
