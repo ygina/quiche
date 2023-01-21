@@ -438,9 +438,11 @@ impl Recovery {
         self.pacer.send(sent_bytes, now);
     }
 
-    pub fn on_quack_received(&mut self, quack: Quack) -> Result<()> {
+    pub fn on_quack_received(
+        &mut self, quack: Quack,
+    ) -> Result<(usize, usize)> {
         if self.last_decoded_quack.count == quack.count {
-            return Ok(());
+            return Ok((0, 0));
         } else{
             self.last_decoded_quack.count = quack.count;
         }
@@ -452,12 +454,12 @@ impl Recovery {
         let missing = self.quack.count - quack.count;
         if missing == 0 || self.log.is_empty() {
             // All packets are accounted for
-            return Ok(());
+            return Ok((0, 0));
         }
         if usize::from(missing) > threshold {
             // return Err(crate::Error::SidecarThresholdExceeded);
             println!("WARNING: threshold exceeded {} > {}", missing, threshold);
-            return Ok(());
+            return Ok((0, 0));
         }
         let mut diff_quack = self.quack.clone() - quack;
         let mut coeffs = DecodedQuack::to_coeffs(&diff_quack);
@@ -478,7 +480,7 @@ impl Recovery {
                     diff_quack.remove(*id);
                     info!("Removed {:?} {:#10x} from quack", epoch, id);
                     if diff_quack.count == 0 {
-                        return Ok(());
+                        return Ok((0, 0));
                     }
                     coeffs = DecodedQuack::to_coeffs(&diff_quack);
                 }
@@ -523,7 +525,7 @@ impl Recovery {
             self.log.len(),
             indexes,
         );
-        Ok(())
+        Ok((0, 0))
     }
 
     pub fn on_ack_received(

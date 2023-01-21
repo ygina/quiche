@@ -1975,7 +1975,10 @@ impl Connection {
             return Err(Error::SidecarMultiplePaths);
         }
         let path = self.paths.get_active_mut()?;
-        path.recovery.on_quack_received(quack)?;
+        let (lost_packets, lost_bytes) =
+            path.recovery.on_quack_received(quack)?;
+        self.lost_count += lost_packets;
+        self.lost_bytes += lost_bytes as u64;
         Ok(())
     }
 
