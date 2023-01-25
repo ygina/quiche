@@ -471,13 +471,15 @@ impl Recovery {
         // Handshake packet. So we must account for Initial packets in the
         // quACK if they will never be marked as ACKed or lost.
         let (_, last_epoch) = self.log[self.log.len() - 1];
+        let mut removed = vec![];
         if last_epoch != packet::Epoch::Initial {
-            for (id, epoch) in &self.log {
+            for (i, (id, epoch)) in self.log.iter().enumerate() {
                 if epoch != &packet::Epoch::Initial {
                     break;
                 }
                 if MonicPolynomialEvaluator::eval(&coeffs, *id).is_zero() {
                     self.quack.remove(*id);
+                    removed.push(i);
                     diff_quack.remove(*id);
                     info!("Removed {:?} {:#10x} from quack", epoch, id);
                     if diff_quack.count == 0 {
@@ -486,6 +488,9 @@ impl Recovery {
                     coeffs = DecodedQuack::to_coeffs(&diff_quack);
                 }
             }
+        }
+        for i in removed.into_iter().rev() {
+            self.log.remove(i);
         }
 
         // Find remaining missing packets
@@ -554,6 +559,11 @@ impl Recovery {
                 lost_packets += 1;
                 self.lost_count += 1;
                 self.quack.remove(unacked.sidecar_id);
+                // TODO: calculate the index when adding packets to missing
+                let index = self.log.iter()
+                    .position(|(x, _)| *x == unacked.sidecar_id)
+                    .expect("id {} was never logged or has been drained");
+                self.log.remove(index);
             }
         }
         self.bytes_in_flight = self.bytes_in_flight.saturating_sub(lost_bytes);
