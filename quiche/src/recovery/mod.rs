@@ -457,12 +457,24 @@ impl Recovery {
             // All packets are accounted for
             return Ok((0, 0));
         }
-        if usize::from(missing) > threshold {
-            // return Err(crate::Error::SidecarThresholdExceeded);
-            println!("WARNING: threshold exceeded {} > {}", missing, threshold);
-            return Ok((0, 0));
-        }
+
+        // If we suspect a large number of missing packets are in the suffix,
+        // we can cheat the threshold and "remove" packets from the difference
+        // quACK. It's possible we are unable to find the remaining packets if
+        // it's the case that some of the packets in the ignored suffix were
+        // actually received. We can check this by showing we can't factor the
+        // coefficients from the difference quACK.
         let mut diff_quack = self.quack.clone() - quack;
+        let ignore = if usize::from(missing) > threshold {
+            let ignore = usize::from(missing) - threshold;
+            let last_index = self.log.len() - ignore;
+            for (id, _) in &self.log[last_index..] {
+                diff_quack.remove(*id);
+            }
+            ignore
+        } else {
+            0
+        };
         let mut coeffs = DecodedQuack::to_coeffs(&diff_quack);
 
         // Once we drain packets in the Handshake epoch, we will never return to
@@ -496,12 +508,12 @@ impl Recovery {
         // Find remaining missing packets
         let mut missing_ids = vec![];
         let mut in_suffix = true;
-        let mut suffix = 0;
-        // TODO(gina): if we suspect a large number of missing packets are in
-        // the suffix, we can cheat the threshold and "remove" packets from our
-        // own quack before calculating the difference quack.
+        let mut suffix = ignore;
         let mut first_missing_index = None;
         for (i, (id, epoch)) in self.log.iter().enumerate().rev() {
+            if i >= self.log.len() - ignore {
+                continue;
+            }
             if MonicPolynomialEvaluator::eval(&coeffs, *id).is_zero() {
                 first_missing_index = Some(i);
                 if in_suffix {
