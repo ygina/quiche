@@ -534,14 +534,15 @@ impl Recovery {
             self.log.drain(..first_missing_index);
         }
 
-        println!(
-            "found {}+{}/{} missing ({} received) (len(log)={}) {:?}",
+        debug!(
+            "found {}+{}/{} missing ({} received) (len(log)={}) factored? {} {:?}",
             missing_ids.len(),
             suffix,
             missing,
             received,
             self.log.len(),
-            missing_ids.iter().map(|id| format!("{:#10x}", id)).collect::<Vec<_>>(),
+            MonicPolynomialEvaluator::factor(&coeffs).is_ok(),
+            missing_ids,
         );
 
         // For packets considered missing (anything not in the suffix), mark it
