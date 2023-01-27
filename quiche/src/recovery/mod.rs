@@ -477,34 +477,6 @@ impl Recovery {
         };
         let mut coeffs = DecodedQuack::to_coeffs(&diff_quack);
 
-        // Once we drain packets in the Handshake epoch, we will never return to
-        // the Initial epoch. RFC9000 17.2.2.1 states a client stops both
-        // sending and processing Initial packets when it receives its first
-        // Handshake packet. So we must account for Initial packets in the
-        // quACK if they will never be marked as ACKed or lost.
-        let (_, last_epoch) = self.log[self.log.len() - 1];
-        let mut removed = vec![];
-        if last_epoch != packet::Epoch::Initial {
-            for (i, (id, epoch)) in self.log.iter().enumerate() {
-                if epoch != &packet::Epoch::Initial {
-                    break;
-                }
-                if MonicPolynomialEvaluator::eval(&coeffs, *id).is_zero() {
-                    self.quack.remove(*id);
-                    removed.push(i);
-                    diff_quack.remove(*id);
-                    info!("Removed {:?} {:#10x} from quack", epoch, id);
-                    if diff_quack.count == 0 {
-                        return Ok((0, 0));
-                    }
-                    coeffs = DecodedQuack::to_coeffs(&diff_quack);
-                }
-            }
-        }
-        for i in removed.into_iter().rev() {
-            self.log.remove(i);
-        }
-
         // Find remaining missing packets
         let mut missing_ids = vec![];
         let mut in_suffix = true;
