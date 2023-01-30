@@ -48,6 +48,9 @@ ffi = []
 # Log the congestion window when it is updated in cubic.
 cwnd_log = []
 
+# Log the sidecar identifier when it is inserted in a quACK.
+quack_log = []
+
 [package.metadata.docs.rs]
 no-default-features = true
 features = ["boringssl-boring-crate", "qlog"]

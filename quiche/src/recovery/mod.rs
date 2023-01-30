@@ -399,6 +399,8 @@ impl Recovery {
             .on_packet_sent(&mut pkt, self.bytes_in_flight - sent_bytes);
 
         if self.sidecar {
+            #[cfg(feature = "quack_log")]
+            println!("quack {:?} {}", std::time::Instant::now(), pkt.sidecar_id);
             self.quack.insert(pkt.sidecar_id);
             self.log.push((pkt.sidecar_id, epoch));
         }
