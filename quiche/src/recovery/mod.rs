@@ -204,6 +204,8 @@ impl Recovery {
     pub fn new_with_config(recovery_config: &RecoveryConfig) -> Self {
         let initial_congestion_window =
             recovery_config.max_send_udp_payload_size * INITIAL_WINDOW_PACKETS;
+        #[cfg(feature = "cwnd_log")]
+        println!("cwnd {} {:?} (new_with_config)", initial_congestion_window, std::time::Instant::now());
 
         Recovery {
             loss_detection_timer: None,
@@ -317,6 +319,8 @@ impl Recovery {
 
     pub fn reset(&mut self) {
         self.congestion_window = self.max_datagram_size * INITIAL_WINDOW_PACKETS;
+        #[cfg(feature = "cwnd_log")]
+        println!("cwnd {} {:?} (reset)", self.congestion_window, std::time::Instant::now());
         self.in_flight_count = [0; packet::Epoch::count()];
         self.congestion_recovery_start_time = None;
         self.ssthresh = std::usize::MAX;
@@ -552,6 +556,8 @@ impl Recovery {
             }
         }
         self.bytes_in_flight = self.bytes_in_flight.saturating_sub(lost_bytes);
+        #[cfg(feature = "cwnd_log")]
+        println!("bytes_in_flight {} {:?} (on_quack_received)", self.bytes_in_flight, std::time::Instant::now());
         self.bytes_lost += lost_bytes as u64;
         // TODO: call on_packets_lost() to adjust cwnd?
         Ok((lost_packets, lost_bytes))
@@ -793,6 +799,8 @@ impl Recovery {
             .fold(0, |acc, p| acc + p.size);
 
         self.bytes_in_flight = self.bytes_in_flight.saturating_sub(unacked_bytes);
+        #[cfg(feature = "cwnd_log")]
+        println!("bytes_in_flight {} {:?} (on_pkt_num_space_discarded)", self.bytes_in_flight, std::time::Instant::now());
 
         self.sent[epoch].clear();
         self.lost[epoch].clear();
@@ -850,6 +858,8 @@ impl Recovery {
             self.max_datagram_size * INITIAL_WINDOW_PACKETS
         {
             self.congestion_window = max_datagram_size * INITIAL_WINDOW_PACKETS;
+            #[cfg(feature = "cwnd_log")]
+            println!("cwnd {} {:?} (update_max_datagram_size)", self.congestion_window, std::time::Instant::now());
         }
 
         self.pacer = pacer::Pacer::new(
@@ -1134,6 +1144,8 @@ impl Recovery {
         epoch: packet::Epoch, now: Instant,
     ) {
         self.bytes_in_flight = self.bytes_in_flight.saturating_sub(lost_bytes);
+        #[cfg(feature = "cwnd_log")]
+        println!("bytes_in_flight {} {:?} (on_packets_lost)", self.bytes_in_flight, std::time::Instant::now());
 
         self.congestion_event(lost_bytes, largest_lost_pkt.time_sent, epoch, now);
 

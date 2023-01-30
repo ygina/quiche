@@ -45,6 +45,9 @@ fuzzing = []
 # Build and expose the FFI API.
 ffi = []
 
+# Log the congestion window when it is updated in cubic.
+cwnd_log = []
+
 [package.metadata.docs.rs]
 no-default-features = true
 features = ["boringssl-boring-crate", "qlog"]

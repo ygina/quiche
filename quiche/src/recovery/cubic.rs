@@ -210,6 +210,8 @@ fn on_packet_acked(
     let in_congestion_recovery = r.in_congestion_recovery(packet.time_sent);
 
     r.bytes_in_flight = r.bytes_in_flight.saturating_sub(packet.size);
+    #[cfg(feature = "cwnd_log")]
+    println!("bytes_in_flight {} {:?} (on_packet_acked)", r.bytes_in_flight, std::time::Instant::now());
 
     if in_congestion_recovery {
         r.prr.on_packet_acked(
@@ -257,8 +259,12 @@ fn on_packet_acked(
             if r.hystart.in_css(epoch) {
                 r.congestion_window +=
                     r.hystart.css_cwnd_inc(r.max_datagram_size);
+                #[cfg(feature = "cwnd_log")]
+                println!("cwnd {} {:?} (on_packet_acked)", r.congestion_window, std::time::Instant::now());
             } else {
                 r.congestion_window += r.max_datagram_size;
+                #[cfg(feature = "cwnd_log")]
+                println!("cwnd {} {:?} (on_packet_acked)", r.congestion_window, std::time::Instant::now());
             }
 
             r.bytes_acked_sl -= r.max_datagram_size;
@@ -341,6 +347,8 @@ fn on_packet_acked(
 
         if r.cubic_state.cwnd_inc >= r.max_datagram_size {
             r.congestion_window += r.max_datagram_size;
+            #[cfg(feature = "cwnd_log")]
+            println!("cwnd {} {:?} (on_packet_acked 3)", r.congestion_window, std::time::Instant::now());
             r.cubic_state.cwnd_inc -= r.max_datagram_size;
         }
     }
@@ -371,6 +379,8 @@ fn congestion_event(
             r.max_datagram_size * recovery::MINIMUM_WINDOW_PACKETS,
         );
         r.congestion_window = r.ssthresh;
+        #[cfg(feature = "cwnd_log")]
+        println!("cwnd {} {:?} (congestion_event)", r.congestion_window, std::time::Instant::now());
 
         r.cubic_state.k = if r.cubic_state.w_max < r.congestion_window as f64 {
             0.0
@@ -413,6 +423,8 @@ fn rollback(r: &mut Recovery) -> bool {
     }
 
     r.congestion_window = r.cubic_state.prior.congestion_window;
+    #[cfg(feature = "cwnd_log")]
+    println!("cwnd {} {:?} (rollback)", r.congestion_window, std::time::Instant::now());
     r.ssthresh = r.cubic_state.prior.ssthresh;
     r.cubic_state.w_max = r.cubic_state.prior.w_max;
     r.cubic_state.k = r.cubic_state.prior.k;
