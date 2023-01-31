@@ -573,6 +573,9 @@ impl Recovery {
                     lost_packets += 1;
                     self.lost_count += 1;
                 }
+                #[cfg(feature = "quack_log")]
+                println!("lost {:?} {} (on_quack_received 1)",
+                    std::time::Instant::now(), unacked.sidecar_id);
                 self.quack.remove(unacked.sidecar_id);
                 // TODO: calculate the index when adding packets to missing
                 let index = self.log.iter()
@@ -586,6 +589,23 @@ impl Recovery {
         println!("bytes_in_flight {} {:?} (on_quack_received)", self.bytes_in_flight, std::time::Instant::now());
         self.bytes_lost += lost_bytes as u64;
         // TODO: call on_packets_lost() to adjust cwnd?
+
+        // Other missing IDs have already been marked lost so just remove it
+        // from the quACK, or it will hang around forever. These were handled by
+        // QUIC's e2e retransmission mechanism before we were able to detect
+        // them in the quACK, so were already drained the packets and probably
+        // retransmitted them. We just need to update them in the quACK too.
+        // This really shouldn't happen if the threshold is set correctly.
+        for id in set.into_iter() {
+            let index = self.log.iter()
+                .position(|(x, _)| *x == id)
+                .expect("id {} was never logged or has been drained");
+            #[cfg(feature = "quack_log")]
+            println!("lost {:?} {} (on_quack_received 2)", std::time::Instant::now(), id);
+            self.log.remove(index);
+            self.quack.remove(id);
+        }
+
         Ok((lost_packets, lost_bytes))
     }
 
