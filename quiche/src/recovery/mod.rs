@@ -483,7 +483,7 @@ impl Recovery {
         } else {
             0
         };
-        let mut coeffs = DecodedQuack::to_coeffs(&diff_quack);
+        let coeffs = DecodedQuack::to_coeffs(&diff_quack);
 
         // Find remaining missing packets
         let mut missing_ids = vec![];
