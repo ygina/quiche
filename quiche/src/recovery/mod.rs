@@ -530,7 +530,20 @@ impl Recovery {
         let now = Instant::now();
         let mut lost_bytes = 0;
         let mut lost_packets = 0;
+        let missing_len = missing_ids.len();
         let mut set = missing_ids.into_iter().collect::<HashSet<u32>>();
+        if set.len() < missing_len {
+            // It is not very likely that two packets have the same identifier
+            // if they are truly different packets. It is even less likely that
+            // of the packets that go missing, one of those has a duplicate in
+            // the log, or that the duplicate is also missing. What happens in
+            // this case is that it's possible we retransmit the wrong packet
+            // (the one with a duplicate identifier), and the truly missing
+            // packet is addressed in QUIC's end-to-end retransmission
+            // mechanism. However, since the quACK polynomial accounts for
+            // multiplicity in its roots, the math stays sound.
+            warn!("duplicate IDs are missing");
+        }
         let epoch = packet::Epoch::Application;
         let unacked_iter = self.sent[epoch]
             .iter_mut()
@@ -558,9 +571,6 @@ impl Recovery {
                             self.in_flight_count[epoch].saturating_sub(1);
                     }
                     lost_packets += 1;
-                    #[cfg(feature = "quack_log")]
-                    println!("lost {:?} {} (on_quack_received)",
-                        std::time::Instant::now(), unacked.sidecar_id);
                     self.lost_count += 1;
                 }
                 self.quack.remove(unacked.sidecar_id);
