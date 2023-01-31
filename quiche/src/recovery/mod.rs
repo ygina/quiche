@@ -535,22 +535,34 @@ impl Recovery {
         let unacked_iter = self.sent[epoch]
             .iter_mut()
             // .take_while(|p| p.pkt_num <= largest_acked)
-            .filter(|p| p.time_acked.is_none() && p.time_lost.is_none());
+            .filter(|p| p.time_acked.is_none());
         for unacked in unacked_iter {
             if set.is_empty() {
                 break;
             }
             if set.remove(&unacked.sidecar_id) {
-                self.lost[epoch].append(&mut unacked.frames);
-                unacked.time_lost = Some(now);
-                if unacked.in_flight {
-                    lost_bytes += unacked.size;
-                    // largest_lost_pkt = Some(unacked.clone()
-                    self.in_flight_count[epoch] =
-                        self.in_flight_count[epoch].saturating_sub(1);
+                // TODO: what if it was acked or lost?
+                // if lost, quic's loss detection mechanism worked before the
+                // quack's. if acked, not possible because r1 must have received
+                // it. or its frame was acked in a different packet? no, it has
+                // to do with acked packets, not frames.
+                if unacked.time_lost.is_some() {
+                    // println!("WARNING: id {} already lost", unacked.sidecar_id);
+                } else {
+                    self.lost[epoch].append(&mut unacked.frames);
+                    unacked.time_lost = Some(now);
+                    if unacked.in_flight {
+                        lost_bytes += unacked.size;
+                        // largest_lost_pkt = Some(unacked.clone()
+                        self.in_flight_count[epoch] =
+                            self.in_flight_count[epoch].saturating_sub(1);
+                    }
+                    lost_packets += 1;
+                    #[cfg(feature = "quack_log")]
+                    println!("lost {:?} {} (on_quack_received)",
+                        std::time::Instant::now(), unacked.sidecar_id);
+                    self.lost_count += 1;
                 }
-                lost_packets += 1;
-                self.lost_count += 1;
                 self.quack.remove(unacked.sidecar_id);
                 // TODO: calculate the index when adding packets to missing
                 let index = self.log.iter()
@@ -1057,6 +1069,9 @@ impl Recovery {
                 }
 
                 lost_packets += 1;
+                #[cfg(feature = "quack_log")]
+                println!("lost {:?} {} (detect_lost_packets)",
+                    std::time::Instant::now(), unacked.sidecar_id);
                 self.lost_count += 1;
             } else {
                 let loss_time = match self.loss_time[epoch] {
