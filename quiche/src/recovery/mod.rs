@@ -459,9 +459,11 @@ impl Recovery {
         let threshold = self.quack.power_sums.len();
         let received = quack.count;
         let missing = self.quack.count - quack.count;
-        if missing == 0 || self.log.is_empty() {
-            // All packets are accounted for
-            return Ok((0, 0));
+        if missing == 0 {
+            // If the log was already empty, then it must be that missing == 0.
+            // We "drain" packets here without going through quack decoding.
+            self.log = vec![];
+            return Ok((0, 0))
         }
 
         // If we suspect a large number of missing packets are in the suffix,
