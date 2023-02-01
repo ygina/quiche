@@ -49,6 +49,11 @@ use quack::{DecodedQuack, Quack, arithmetic::MonicPolynomialEvaluator};
 use smallvec::SmallVec;
 
 // Loss Recovery
+const SIDECAR_IGNORE_THRESHOLD: usize = 10000;
+
+// For the e2e loss detection timeout it's RRT * packet thresh
+const SIDECAR_LINK2_LOSS_DELAY: Duration = Duration::from_millis(3);
+
 const INITIAL_PACKET_THRESHOLD: u64 = 3;
 
 const MAX_PACKET_THRESHOLD: u64 = 20;
@@ -174,7 +179,7 @@ pub struct Recovery {
     sidecar: bool,
     quack: Quack,
     last_decoded_quack: Quack,
-    log: Vec<(u32, packet::Epoch)>,
+    log: Vec<(u32, Instant, packet::Epoch)>,
 }
 
 pub struct RecoveryConfig {
@@ -403,7 +408,7 @@ impl Recovery {
             #[cfg(feature = "quack_log")]
             println!("quack {:?} {}", std::time::Instant::now(), pkt.sidecar_id);
             self.quack.insert(pkt.sidecar_id);
-            self.log.push((pkt.sidecar_id, epoch));
+            self.log.push((pkt.sidecar_id, pkt.time_sent, epoch));
         }
 
         self.sent[epoch].push_back(pkt);
@@ -449,22 +454,43 @@ impl Recovery {
     pub fn on_quack_received(
         &mut self, quack: Quack,
     ) -> Result<(usize, usize)> {
+        // Don't process the quack if it hasn't changed since the last one we
+        // received.
         if self.last_decoded_quack.count == quack.count {
             return Ok((0, 0));
-        } else{
+        } else {
             self.last_decoded_quack.count = quack.count;
         }
         if self.quack.count < quack.count {
             return Err(crate::Error::SidecarInvalidQuack);
-        }
-        let threshold = self.quack.power_sums.len();
-        let received = quack.count;
-        let missing = self.quack.count - quack.count;
-        if missing == 0 {
+        } else if self.quack.count == quack.count {
             // If the log was already empty, then it must be that missing == 0.
             // We "drain" packets here without going through quack decoding.
             self.log = vec![];
             return Ok((0, 0))
+        }
+
+        // Drain any packets from the start of the log that were sent more than
+        // SIDECAR_LINK2_LOSS_DELAY time ago.
+        let mut missing_ids = vec![];
+        let mut num_lost_timer = 0;
+        let mut num_lost_ack = 0;
+        {
+            // let lost_send_time = Instant::now() - SIDECAR_LINK2_LOSS_DELAY;
+            // let mut last_index = 0;
+            // for (i, (id, time_sent, epoch)) in self.log.iter().enumerate() {
+            //     if epoch != &packet::Epoch::Application {
+            //         break;
+            //     }
+            //     if time_sent > &lost_send_time {
+            //         last_index = i;
+            //         break;
+            //     }
+            //     missing_ids.push(*id);
+            //     self.quack.remove(*id);
+            //     num_lost_timer += 1;
+            // }
+            // self.log.drain(..last_index);
         }
 
         // If we suspect a large number of missing packets are in the suffix,
@@ -473,58 +499,82 @@ impl Recovery {
         // it's the case that some of the packets in the ignored suffix were
         // actually received. We can check this by showing we can't factor the
         // coefficients from the difference quACK.
+        let threshold = self.quack.power_sums.len();
+        let received = quack.count;
+        let missing = self.quack.count - quack.count;
         let mut diff_quack = self.quack.clone() - quack;
-        let ignore = if usize::from(missing) > threshold {
-            let ignore = usize::from(missing) - threshold;
-            let last_index = self.log.len() - ignore;
-            for (id, _) in &self.log[last_index..] {
-                diff_quack.remove(*id);
+        let mut suffix = 0;
+        let coeffs = {
+            if usize::from(missing) > threshold {
+                suffix = usize::from(missing) - threshold;
+                // println!("WARN: exceeded threshold by {} {:?}",
+                //     suffix, Instant::now() - self.log[0].1);
+                // // if suffix >= SIDECAR_IGNORE_THRESHOLD {
+                // //     return Ok((0, 0));
+                // // }
+                // let last_index = self.log.len() - suffix;
+                // for (id, _, _) in &self.log[last_index..] {
+                //     diff_quack.remove(*id);
+                // }
+                return Ok((0, 0));
             }
-            ignore
-        } else {
-            0
+            DecodedQuack::to_coeffs(&diff_quack)
         };
-        let coeffs = DecodedQuack::to_coeffs(&diff_quack);
 
         // Find remaining missing packets
-        let mut missing_ids = vec![];
-        let mut in_suffix = true;
-        let mut suffix = ignore;
-        let mut first_missing_index = None;
-        for (i, (id, epoch)) in self.log.iter().enumerate().rev() {
-            if i >= self.log.len() - ignore {
-                continue;
-            }
-            if MonicPolynomialEvaluator::eval(&coeffs, *id).is_zero() {
-                first_missing_index = Some(i);
-                if in_suffix {
-                    suffix += 1;
-                } else if epoch == &packet::Epoch::Application {
-                    missing_ids.push(*id);
-                }
-            } else {
-                if in_suffix {
+        {
+            let mut in_suffix = true;
+            let mut missing_indexes = vec![];
+            let mut first_missing_index = None;
+            for i in (0..(self.log.len() - suffix)).rev()
+            {
+                let (id, _, _) = self.log[i];
+                if MonicPolynomialEvaluator::eval(&coeffs, id).is_zero() {
+                    first_missing_index = Some(i);
+                    if in_suffix {
+                        suffix += 1;
+                    } else {
+                        missing_ids.push(id);
+                        missing_indexes.push(i);
+                        num_lost_ack += 1;
+                    }
+                } else {
                     in_suffix = false;
                 }
             }
+            for i in missing_indexes {
+                let (id, _, _) = self.log.remove(i);
+                self.quack.remove(id)  // TODO: still O(n)
+            }
+            // Truncate packets in the prefix of the log that have been
+            // received, since they will only also be received in the future.
+            if let Some(first_missing_index) = first_missing_index {
+                self.log.drain(..first_missing_index);
+            }
         }
 
-        // Truncate packets in the prefix of the log that have been received,
-        // since they will only also be received in the future.
-        if let Some(first_missing_index) = first_missing_index {
-            self.log.drain(..first_missing_index);
-        }
-
-        debug!(
-            "found {}+{}/{} missing ({} received) (len(log)={}) factored? {} {:?}",
-            missing_ids.len(),
-            suffix,
-            missing,
-            received,
-            self.log.len(),
-            MonicPolynomialEvaluator::factor(&coeffs).is_ok(),
-            missing_ids,
-        );
+        // let roots = MonicPolynomialEvaluator::factor(&coeffs);
+        // debug!(
+        //     "found {}+{}/{} missing timer_lost={} (sent={}) (log {}) factored? {} {:?}",
+        //     num_lost_ack,
+        //     suffix,
+        //     missing,
+        //     num_lost_timer,
+        //     self.quack.count,
+        //     self.log.len(),
+        //     roots.is_ok(),
+        //     missing_ids,
+        // );
+        // if (num_lost_ack + suffix) != (missing as usize) {
+        //     let now = Instant::now();
+        //     println!("self.quack.count={}", self.quack.count);
+        //     println!("quack.count={}", received);
+        //     println!("{:?}", self.log.iter().map(|(id, time_sent, _)| (id,
+        //         now - *time_sent)).collect::<Vec<_>>());
+        //     println!("{:?}", missing_ids);
+        //     println!("{:?}", roots.unwrap());
+        //     assert_eq!(num_lost_ack + suffix, missing as usize);
+        // }
 
         // For packets considered missing (anything not in the suffix), mark it
         // as lost and add it to self.lost[epoch] for retransmission.
@@ -574,37 +624,17 @@ impl Recovery {
                     lost_packets += 1;
                     self.lost_count += 1;
                 }
-                #[cfg(feature = "quack_log")]
-                println!("lost {:?} {} (on_quack_received 1)",
-                    std::time::Instant::now(), unacked.sidecar_id);
-                self.quack.remove(unacked.sidecar_id);
-                // TODO: calculate the index when adding packets to missing
-                let index = self.log.iter()
-                    .position(|(x, _)| *x == unacked.sidecar_id)
-                    .expect("id {} was never logged or has been drained");
-                self.log.remove(index);
             }
         }
         self.bytes_in_flight = self.bytes_in_flight.saturating_sub(lost_bytes);
-        #[cfg(feature = "cwnd_log")]
-        println!("bytes_in_flight {} {:?} (on_quack_received)", self.bytes_in_flight, std::time::Instant::now());
         self.bytes_lost += lost_bytes as u64;
         // TODO: call on_packets_lost() to adjust cwnd?
 
-        // Other missing IDs have already been marked lost so just remove it
-        // from the quACK, or it will hang around forever. These were handled by
-        // QUIC's e2e retransmission mechanism before we were able to detect
-        // them in the quACK, so were already drained the packets and probably
-        // retransmitted them. We just need to update them in the quACK too.
-        // This really shouldn't happen if the threshold is set correctly.
-        for id in set.into_iter() {
-            let index = self.log.iter()
-                .position(|(x, _)| *x == id)
-                .expect("id {} was never logged or has been drained");
-            #[cfg(feature = "quack_log")]
-            println!("lost {:?} {} (on_quack_received 2)", std::time::Instant::now(), id);
-            self.log.remove(index);
-            self.quack.remove(id);
+        // Other missing IDs are not in the sent data structure, possibly
+        // because they have already been drained after being marked as lost
+        // by QUIC's e2e retransmission mechanism.
+        if !set.is_empty() {
+            // println!("WARNING: {} missing ids unaccounted for", set.len());
         }
 
         Ok((lost_packets, lost_bytes))
@@ -846,8 +876,6 @@ impl Recovery {
             .fold(0, |acc, p| acc + p.size);
 
         self.bytes_in_flight = self.bytes_in_flight.saturating_sub(unacked_bytes);
-        #[cfg(feature = "cwnd_log")]
-        println!("bytes_in_flight {} {:?} (on_pkt_num_space_discarded)", self.bytes_in_flight, std::time::Instant::now());
 
         self.sent[epoch].clear();
         self.lost[epoch].clear();
@@ -1194,8 +1222,6 @@ impl Recovery {
         epoch: packet::Epoch, now: Instant,
     ) {
         self.bytes_in_flight = self.bytes_in_flight.saturating_sub(lost_bytes);
-        #[cfg(feature = "cwnd_log")]
-        println!("bytes_in_flight {} {:?} (on_packets_lost)", self.bytes_in_flight, std::time::Instant::now());
 
         self.congestion_event(lost_bytes, largest_lost_pkt.time_sent, epoch, now);
 
