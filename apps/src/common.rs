@@ -68,6 +68,7 @@ pub mod alpns {
 }
 
 pub struct PartialRequest {
+    pub headers: Vec<quiche::h3::Header>,
     pub req: Vec<u8>,
 }
 
@@ -733,6 +734,7 @@ impl HttpConn for Http09Conn {
                     } else {
                         if !stream_buf.ends_with(b"\r\n") {
                             let request = PartialRequest {
+                                headers: vec![],
                                 req: stream_buf.to_vec(),
                             };
 
@@ -1026,7 +1028,7 @@ impl Http3Conn {
 
     /// Builds an HTTP/3 response given a request.
     fn build_h3_response(
-        root: &str, index: &str, request: &[quiche::h3::Header],
+        root: &str, index: &str, request: &[quiche::h3::Header], body: Vec<u8>,
     ) -> Http3ResponseBuilderResult {
         let mut file_path = path::PathBuf::from(root);
         let mut scheme = None;
@@ -1094,7 +1096,19 @@ impl Http3Conn {
 
                 b"host" => host = Some(std::str::from_utf8(hdr.value()).unwrap()),
 
-                _ => (),
+                b"content-length" => {
+                    let len = std::str::from_utf8(hdr.value()).unwrap();
+                    let len: usize = len.parse().unwrap();
+                    assert_eq!(body.len(), len);
+                },
+
+                _ => {
+                    warn!(
+                        "unparsed header: {:?} = {:?}",
+                        std::str::from_utf8(hdr.name()),
+                        std::str::from_utf8(hdr.value()),
+                    );
+                },
             }
         }
 
@@ -1232,6 +1246,8 @@ impl Http3Conn {
                     Err(_) => (404, b"Not Found!".to_vec()),
                 }
             },
+
+            "POST" => (200, b"OK!".to_vec()),
 
             _ => (405, Vec::new()),
         };
@@ -1534,24 +1550,29 @@ impl HttpConn for Http3Conn {
 
     fn handle_requests(
         &mut self, conn: &mut quiche::Connection,
-        _partial_requests: &mut HashMap<u64, PartialRequest>,
+        partial_requests: &mut HashMap<u64, PartialRequest>,
         partial_responses: &mut HashMap<u64, PartialResponse>, root: &str,
         index: &str, buf: &mut [u8],
     ) -> quiche::h3::Result<()> {
         // Process HTTP events.
         loop {
+            let mut send_response = None;
             match self.h3_conn.poll(conn) {
-                Ok((stream_id, quiche::h3::Event::Headers { list, .. })) => {
+                Ok((stream_id, quiche::h3::Event::Headers { list, has_body })) =>
+
+                {
                     info!(
-                        "{} got request {:?} on stream id {}",
+                        "{} got request {:?} on stream id {} (has_body = {})",
                         conn.trace_id(),
                         hdrs_to_strings(&list),
-                        stream_id
+                        stream_id,
+                        has_body,
                     );
 
                     self.largest_processed_request =
                         std::cmp::max(self.largest_processed_request, stream_id);
 
+                    /*
                     // We decide the response based on headers alone, so
                     // stop reading the request stream so that any body
                     // is ignored and pointless Data events are not
@@ -1668,6 +1689,16 @@ impl HttpConn for Http3Conn {
 
                         partial_responses.insert(stream_id, response);
                     }
+                    */
+
+                    let req = PartialRequest {
+                        headers: list,
+                        req: vec![],
+                    };
+                    partial_requests.insert(stream_id, req);
+                    if !has_body {
+                        send_response = Some(stream_id);
+                    }
                 },
 
                 Ok((stream_id, quiche::h3::Event::Data)) => {
@@ -1676,9 +1707,33 @@ impl HttpConn for Http3Conn {
                         conn.trace_id(),
                         stream_id
                     );
+                    if let Some(req) = partial_requests.get_mut(&stream_id) {
+                        match self.h3_conn.recv_body(conn, stream_id, buf) {
+                            Ok(n) => {
+                                debug!("received {} bytes", n);
+                                req.req.append(&mut buf[..n].to_vec());
+                            }
+                            Err(quiche::h3::Error::Done) => {
+                                debug!("done reading data");
+                                send_response = Some(stream_id);
+                            }
+                            Err(e) => {
+                                error!("recv_body error: {:?}", e);
+                            }
+                        }
+                    } else {
+                        error!("partial request does not exist: {}", stream_id);
+                    }
                 },
 
-                Ok((_stream_id, quiche::h3::Event::Finished)) => (),
+                Ok((stream_id, quiche::h3::Event::Finished)) => {
+                    info!("finished stream id = {}", stream_id);
+                    if partial_requests.contains_key(&stream_id) {
+                        send_response = Some(stream_id);
+                    } else {
+                        error!("partial request does not exist: {}", stream_id);
+                    }
+                },
 
                 Ok((_stream_id, quiche::h3::Event::Reset { .. })) => (),
 
@@ -1725,6 +1780,126 @@ impl HttpConn for Http3Conn {
 
                     return Err(e);
                 },
+            }
+
+            if let Some(stream_id) = send_response {
+                let req = partial_requests.remove(&stream_id).unwrap();
+
+                // We NO LONGER decide the response based on headers alone, so
+                // WE DON'T stop reading the request stream so that any body
+                // is ignored and pointless Data events ARE generated.
+                conn.stream_shutdown(stream_id, quiche::Shutdown::Read, 0)
+                    .unwrap();
+
+                let (mut headers, body, mut priority) =
+                    match Http3Conn::build_h3_response(root, index, &req.headers, req.req) {
+                        Ok(v) => v,
+
+                        Err((error_code, _)) => {
+                            conn.stream_shutdown(
+                                stream_id,
+                                quiche::Shutdown::Write,
+                                error_code,
+                            )
+                            .unwrap();
+                            continue;
+                        },
+                    };
+
+                match self.h3_conn.take_last_priority_update(stream_id) {
+                    Ok(v) => {
+                        priority = v;
+                    },
+
+                    Err(quiche::h3::Error::Done) => (),
+
+                    Err(e) => error!(
+                        "{} error taking PRIORITY_UPDATE {}",
+                        conn.trace_id(),
+                        e
+                    ),
+                }
+
+                if !priority.is_empty() {
+                    headers.push(quiche::h3::Header::new(
+                        b"priority",
+                        priority.as_slice(),
+                    ));
+                }
+
+                #[cfg(feature = "sfv")]
+                let priority =
+                    match quiche::h3::Priority::try_from(priority.as_slice())
+                    {
+                        Ok(v) => v,
+                        Err(_) => quiche::h3::Priority::default(),
+                    };
+
+                #[cfg(not(feature = "sfv"))]
+                let priority = quiche::h3::Priority::default();
+
+                info!(
+                    "{} prioritizing response on stream {} as {:?}",
+                    conn.trace_id(),
+                    stream_id,
+                    priority
+                );
+
+                match self.h3_conn.send_response_with_priority(
+                    conn, stream_id, &headers, &priority, false,
+                ) {
+                    Ok(v) => v,
+
+                    Err(quiche::h3::Error::StreamBlocked) => {
+                        let response = PartialResponse {
+                            headers: Some(headers),
+                            body,
+                            written: 0,
+                        };
+
+                        partial_responses.insert(stream_id, response);
+                        continue;
+                    },
+
+                    Err(e) => {
+                        error!(
+                            "{} stream send failed {:?}",
+                            conn.trace_id(),
+                            e
+                        );
+
+                        break;
+                    },
+                }
+
+                let written = match self
+                    .h3_conn
+                    .send_body(conn, stream_id, &body, true)
+                {
+                    Ok(v) => v,
+
+                    Err(quiche::h3::Error::Done) => 0,
+
+                    Err(e) => {
+                        error!(
+                            "{} stream send failed {:?}",
+                            conn.trace_id(),
+                            e
+                        );
+
+                        break;
+                    },
+                };
+
+                if written < body.len() {
+                    let response = PartialResponse {
+                        headers: None,
+                        body,
+                        written,
+                    };
+
+                    partial_responses.insert(stream_id, response);
+                }
             }
         }
 
