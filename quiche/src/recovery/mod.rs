@@ -46,6 +46,7 @@ use crate::ranges;
 use qlog::events::EventData;
 
 use quack::{DecodedQuack, Quack, arithmetic::MonicPolynomialEvaluator};
+use smallvec::SmallVec;
 
 // Loss Recovery
 const INITIAL_PACKET_THRESHOLD: u64 = 3;
@@ -695,7 +696,7 @@ impl Recovery {
                 largest_newly_acked_pkt_num = unacked.pkt_num;
                 largest_newly_acked_sent_time = unacked.time_sent;
 
-                self.acked[epoch].append(&mut unacked.frames);
+                self.acked[epoch].extend(unacked.frames.drain(..));
 
                 if unacked.in_flight {
                     self.in_flight_count[epoch] =
@@ -1057,7 +1058,7 @@ impl Recovery {
         let loss_delay = cmp::max(loss_delay, GRANULARITY);
 
         // Packets sent before this time are deemed lost.
-        let lost_send_time = now - loss_delay;
+        let lost_send_time = now.checked_sub(loss_delay).unwrap();
 
         let mut lost_packets = 0;
         let mut lost_bytes = 0;
@@ -1076,7 +1077,7 @@ impl Recovery {
             if unacked.time_sent <= lost_send_time ||
                 largest_acked >= unacked.pkt_num + self.pkt_thresh
             {
-                self.lost[epoch].append(&mut unacked.frames);
+                self.lost[epoch].extend(unacked.frames.drain(..));
 
                 unacked.time_lost = Some(now);
 
@@ -1335,7 +1336,7 @@ impl std::fmt::Debug for Recovery {
 
                 if v > now {
                     let d = v.duration_since(now);
-                    write!(f, "timer={:?} ", d)?;
+                    write!(f, "timer={d:?} ")?;
                 } else {
                     write!(f, "timer=exp ")?;
                 }
@@ -1381,7 +1382,7 @@ pub struct Sent {
 
     pub pkt_num: u64,
 
-    pub frames: Vec<frame::Frame>,
+    pub frames: SmallVec<[frame::Frame; 1]>,
 
     pub time_sent: Instant,
 
@@ -1587,6 +1588,7 @@ impl QlogMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use smallvec::smallvec;
 
     #[test]
     fn lookup_cc_algo_ok() {
@@ -1628,7 +1630,7 @@ mod tests {
         // Start by sending a few packets.
         let p = Sent {
             pkt_num: 0,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
@@ -1654,7 +1656,7 @@ mod tests {
 
         let p = Sent {
             pkt_num: 1,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
@@ -1680,7 +1682,7 @@ mod tests {
 
         let p = Sent {
             pkt_num: 2,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
@@ -1706,7 +1708,7 @@ mod tests {
 
         let p = Sent {
             pkt_num: 3,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
@@ -1764,7 +1766,7 @@ mod tests {
 
         let p = Sent {
             pkt_num: 4,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
@@ -1790,7 +1792,7 @@ mod tests {
 
         let p = Sent {
             pkt_num: 5,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
@@ -1861,7 +1863,7 @@ mod tests {
         // Start by sending a few packets.
         let p = Sent {
             pkt_num: 0,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
@@ -1887,7 +1889,7 @@ mod tests {
 
         let p = Sent {
             pkt_num: 1,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
@@ -1913,7 +1915,7 @@ mod tests {
 
         let p = Sent {
             pkt_num: 2,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
@@ -1939,7 +1941,7 @@ mod tests {
 
         let p = Sent {
             pkt_num: 3,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
@@ -2021,7 +2023,7 @@ mod tests {
         // Start by sending a few packets.
         let p = Sent {
             pkt_num: 0,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
@@ -2047,7 +2049,7 @@ mod tests {
 
         let p = Sent {
             pkt_num: 1,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
@@ -2073,7 +2075,7 @@ mod tests {
 
         let p = Sent {
             pkt_num: 2,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
@@ -2099,7 +2101,7 @@ mod tests {
 
         let p = Sent {
             pkt_num: 3,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
@@ -2193,7 +2195,7 @@ mod tests {
         // send out first packet (a full initcwnd).
         let p = Sent {
             pkt_num: 0,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
@@ -2250,7 +2252,7 @@ mod tests {
         // Send out second packet.
         let p = Sent {
             pkt_num: 1,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
@@ -2281,7 +2283,7 @@ mod tests {
         // Send the third packet out.
         let p = Sent {
             pkt_num: 2,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
@@ -2309,7 +2311,7 @@ mod tests {
         // Send the third packet out.
         let p = Sent {
             pkt_num: 3,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
