@@ -3352,15 +3352,15 @@ impl Connection {
         }
 
         // Limit output packet size by congestion window size.
-        left = cmp::min(
-            left,
-            self.paths
-                .get(send_pid)?
-                .recovery
-                .cwnd_available()
-                .saturating_sub(overhead)
-                .saturating_sub(left_before_packing_ack_frame - left), /* bytes consumed by ACK frames */
-        );
+        let cwnd_available = self.paths
+            .get(send_pid)?
+            .recovery
+            .cwnd_available()
+            .saturating_sub(overhead)
+            .saturating_sub(left_before_packing_ack_frame - left); /* bytes consumed by ACK frames */
+        if cwnd_available < left {
+            left = 0;
+        }
 
         let mut challenge_data = None;
 
