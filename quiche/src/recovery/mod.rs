@@ -461,67 +461,85 @@ impl Recovery {
         } else {
             self.last_decoded_quack.count = quack.count;
         }
+
+        // This should never happen, unless the counts overflow (TODO).
         if self.quack.count < quack.count {
             return Err(crate::Error::SidecarInvalidQuack);
-        } else if self.quack.count == quack.count {
-            // If the log was already empty, then it must be that missing == 0.
-            // We "drain" packets here without going through quack decoding.
+        }
+
+        // We "drain" packets here without going through quack decoding.
+        // If the log was already empty, then it must be that missing == 0.
+        if self.quack.count == quack.count {
             self.log = vec![];
             return Ok((0, 0))
         }
 
-        // Drain any packets from the start of the log that were sent more than
-        // SIDECAR_LINK2_LOSS_DELAY time ago.
-        let mut missing_ids = vec![];
-        let mut num_lost_timer = 0;
-        let mut num_lost_ack = 0;
-        {
-            // let lost_send_time = Instant::now() - SIDECAR_LINK2_LOSS_DELAY;
-            // let mut last_index = 0;
-            // for (i, (id, time_sent, epoch)) in self.log.iter().enumerate() {
-            //     if epoch != &packet::Epoch::Application {
-            //         break;
-            //     }
-            //     if time_sent > &lost_send_time {
-            //         last_index = i;
-            //         break;
-            //     }
-            //     missing_ids.push(*id);
-            //     self.quack.remove(*id);
-            //     num_lost_timer += 1;
-            // }
-            // self.log.drain(..last_index);
-        }
-
-        // If we suspect a large number of missing packets are in the suffix,
-        // we can cheat the threshold and "remove" packets from the difference
-        // quACK. It's possible we are unable to find the remaining packets if
-        // it's the case that some of the packets in the ignored suffix were
-        // actually received. We can check this by showing we can't factor the
-        // coefficients from the difference quACK.
+        // We can't decode the quACK if the difference in the number of packets
+        // sent and received exceeds the threshold.
         let threshold = self.quack.power_sums.len();
         let received = quack.count;
-        let missing = self.quack.count - quack.count;
-        let mut diff_quack = self.quack.clone() - quack;
+        let missing = self.quack.count - received;
+        if usize::from(missing) > threshold {
+            return Ok((0, 0));
+        }
+
+        // Drain any packets from the start of the log that were sent more than
+        // let mut missing_ids = vec![];
+        // let mut num_lost_timer = 0;
+        // let mut num_lost_ack = 0;
+        // {
+        //     // let lost_send_time = Instant::now() - SIDECAR_LINK2_LOSS_DELAY;
+        //     // let mut last_index = 0;
+        //     // for (i, (id, time_sent, epoch)) in self.log.iter().enumerate() {
+        //     //     if epoch != &packet::Epoch::Application {
+        //     //         break;
+        //     //     }
+        //     //     if time_sent > &lost_send_time {
+        //     //         last_index = i;
+        //     //         break;
+        //     //     }
+        //     //     missing_ids.push(*id);
+        //     //     self.quack.remove(*id);
+        //     //     num_lost_timer += 1;
+        //     // }
+        //     // self.log.drain(..last_index);
+        // }
+
+        // // If we suspect a large number of missing packets are in the suffix,
+        // // we can cheat the threshold and "remove" packets from the difference
+        // // quACK. It's possible we are unable to find the remaining packets if
+        // // it's the case that some of the packets in the ignored suffix were
+        // // actually received. We can check this by showing we can't factor the
+        // // coefficients from the difference quACK.
+        // let threshold = self.quack.power_sums.len();
+        // let received = quack.count;
+        // let missing = self.quack.count - quack.count;
+        // let mut diff_quack = self.quack.clone() - quack;
+        // let mut suffix = 0;
+        // let coeffs = {
+        //     if usize::from(missing) > threshold {
+        //         suffix = usize::from(missing) - threshold;
+        //         // println!("WARN: exceeded threshold by {} {:?}",
+        //         //     suffix, Instant::now() - self.log[0].1);
+        //         // // if suffix >= SIDECAR_IGNORE_THRESHOLD {
+        //         // //     return Ok((0, 0));
+        //         // // }
+        //         // let last_index = self.log.len() - suffix;
+        //         // for (id, _, _) in &self.log[last_index..] {
+        //         //     diff_quack.remove(*id);
+        //         // }
+        //         return Ok((0, 0));
+        //     }
+        //     DecodedQuack::to_coeffs(&diff_quack)
+        // };
+
+        // Find the missing packets that are not in the suffix.
+        let mut missing_ids = vec![];
         let mut suffix = 0;
         let coeffs = {
-            if usize::from(missing) > threshold {
-                suffix = usize::from(missing) - threshold;
-                // println!("WARN: exceeded threshold by {} {:?}",
-                //     suffix, Instant::now() - self.log[0].1);
-                // // if suffix >= SIDECAR_IGNORE_THRESHOLD {
-                // //     return Ok((0, 0));
-                // // }
-                // let last_index = self.log.len() - suffix;
-                // for (id, _, _) in &self.log[last_index..] {
-                //     diff_quack.remove(*id);
-                // }
-                return Ok((0, 0));
-            }
+            let diff_quack = self.quack.clone() - quack;
             DecodedQuack::to_coeffs(&diff_quack)
         };
-
-        // Find remaining missing packets
         {
             let mut in_suffix = true;
             let mut missing_indexes = vec![];
@@ -536,7 +554,7 @@ impl Recovery {
                     } else {
                         missing_ids.push(id);
                         missing_indexes.push(i);
-                        num_lost_ack += 1;
+                        // num_lost_ack += 1;
                     }
                 } else {
                     in_suffix = false;
@@ -553,37 +571,26 @@ impl Recovery {
             }
         }
 
-        // let roots = MonicPolynomialEvaluator::factor(&coeffs);
-        // debug!(
-        //     "found {}+{}/{} missing timer_lost={} (sent={}) (log {}) factored? {} {:?}",
-        //     num_lost_ack,
+        // println!(
+        //     "found {}+{}/{} missing (sent={}) (log {}) factored? {} {:?}",
+        //     missing_ids.len(),
         //     suffix,
         //     missing,
-        //     num_lost_timer,
         //     self.quack.count,
         //     self.log.len(),
-        //     roots.is_ok(),
+        //     MonicPolynomialEvaluator::factor(&coeffs).is_ok(),
         //     missing_ids,
         // );
-        // if (num_lost_ack + suffix) != (missing as usize) {
-        //     let now = Instant::now();
-        //     println!("self.quack.count={}", self.quack.count);
-        //     println!("quack.count={}", received);
-        //     println!("{:?}", self.log.iter().map(|(id, time_sent, _)| (id,
-        //         now - *time_sent)).collect::<Vec<_>>());
-        //     println!("{:?}", missing_ids);
-        //     println!("{:?}", roots.unwrap());
-        //     assert_eq!(num_lost_ack + suffix, missing as usize);
-        // }
 
         // For packets considered missing (anything not in the suffix), mark it
         // as lost and add it to self.lost[epoch] for retransmission.
         let now = Instant::now();
         let mut lost_bytes = 0;
         let mut lost_packets = 0;
-        let missing_len = missing_ids.len();
-        let mut set = missing_ids.into_iter().collect::<HashSet<u32>>();
-        if set.len() < missing_len {
+        let mut set = {
+            let missing_len = missing_ids.len();
+            let set = missing_ids.into_iter().collect::<HashSet<u32>>();
+
             // It is not very likely that two packets have the same identifier
             // if they are truly different packets. It is even less likely that
             // of the packets that go missing, one of those has a duplicate in
@@ -593,8 +600,11 @@ impl Recovery {
             // packet is addressed in QUIC's end-to-end retransmission
             // mechanism. However, since the quACK polynomial accounts for
             // multiplicity in its roots, the math stays sound.
-            warn!("duplicate IDs are missing");
-        }
+            if set.len() < missing_len {
+                warn!("duplicate IDs are missing");
+            }
+            set
+        };
         let epoch = packet::Epoch::Application;
         let unacked_iter = self.sent[epoch]
             .iter_mut()
