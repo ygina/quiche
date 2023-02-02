@@ -563,7 +563,7 @@ impl Recovery {
                 if unacked.time_lost.is_some() {
                     // println!("WARNING: id {} already lost", unacked.sidecar_id);
                 } else {
-                    self.lost[epoch].append(&mut unacked.frames);
+                    self.lost[epoch].extend(unacked.frames.drain(..));
                     unacked.time_lost = Some(now);
                     if unacked.in_flight {
                         lost_bytes += unacked.size;
