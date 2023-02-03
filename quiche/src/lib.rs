@@ -535,6 +535,9 @@ pub enum Error {
 
     /// Received a quACK where the difference exceeds our threshold.
     SidecarThresholdExceeded,
+
+    /// Failed to send a quACK reset message.
+    BadQuackResetSocket,
 }
 
 impl Error {
@@ -575,6 +578,7 @@ impl Error {
             Error::SidecarMultiplePaths => -19,
             Error::SidecarInvalidQuack => -20,
             Error::SidecarThresholdExceeded => -21,
+            Error::BadQuackResetSocket => -22,
         }
     }
 }
@@ -1971,13 +1975,13 @@ impl Connection {
     }
 
     /// Process quACKs received from a sidecar.
-    pub fn recv_quack(&mut self, quack: Quack) -> Result<()> {
+    pub fn recv_quack(&mut self, quack: Quack, from: SocketAddr) -> Result<()> {
         if self.paths.len() != 1 {
             return Err(Error::SidecarMultiplePaths);
         }
         let path = self.paths.get_active_mut()?;
         let (lost_packets, lost_bytes) =
-            path.recovery.on_quack_received(quack)?;
+            path.recovery.on_quack_received(quack, from)?;
         self.lost_count += lost_packets;
         self.lost_bytes += lost_bytes as u64;
         Ok(())

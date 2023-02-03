@@ -316,7 +316,9 @@ typedef struct {
 } quiche_recv_info;
 
 // Processes quACKs received from a sidecar.
-void quiche_conn_recv_quack(quiche_conn *conn, uint8_t *quack_buf, size_t quack_buf_len);
+void quiche_conn_recv_quack(quiche_conn *conn,
+                            uint8_t *quack_buf, size_t quack_buf_len,
+                            const struct sockaddr *addr, size_t addr_len);
 
 // Processes QUIC packets received from the peer.
 ssize_t quiche_conn_recv(quiche_conn *conn, uint8_t *buf, size_t buf_len,

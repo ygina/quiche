@@ -722,6 +722,7 @@ impl<'a> From<&RecvInfo<'a>> for crate::RecvInfo {
 #[no_mangle]
 pub extern fn quiche_conn_recv_quack(
     conn: *mut Connection, quack_buf: *mut u8, quack_buf_len: size_t,
+    addr: &sockaddr, addr_len: socklen_t,
 ) {
     if conn.is_null() {
         return;
@@ -729,7 +730,8 @@ pub extern fn quiche_conn_recv_quack(
     let buf = unsafe { slice::from_raw_parts_mut(quack_buf, quack_buf_len) };
     let quack: Quack = bincode::deserialize(&buf).unwrap();
     let conn: &mut Connection = unsafe { &mut *conn };
-    conn.recv_quack(quack).unwrap();
+    let from = std_addr_from_c(addr, addr_len);
+    conn.recv_quack(quack, from).unwrap();
 }
 
 #[no_mangle]

@@ -26,6 +26,9 @@
 
 use std::cmp;
 
+use std::net::UdpSocket;
+use std::net::SocketAddr;
+
 use std::str::FromStr;
 
 use std::time::Duration;
@@ -50,6 +53,8 @@ use smallvec::SmallVec;
 
 // Loss Recovery
 const SIDECAR_IGNORE_THRESHOLD: usize = 10000;
+
+const SIDECAR_RESET_THRESHOLD: Duration = Duration::from_millis(10);
 
 // For the e2e loss detection timeout it's RRT * packet thresh
 const SIDECAR_LINK2_LOSS_DELAY: Duration = Duration::from_millis(3);
@@ -179,6 +184,8 @@ pub struct Recovery {
     sidecar: bool,
     quack: Quack,
     last_decoded_quack: Quack,
+    last_quack_reset: Instant,
+    quack_epoch: u8,
     log: Vec<(u32, Instant, packet::Epoch)>,
 }
 
@@ -310,6 +317,10 @@ impl Recovery {
             quack: Quack::new(recovery_config.sidecar_threshold),
 
             last_decoded_quack: Quack::new(recovery_config.sidecar_threshold),
+
+            last_quack_reset: Instant::now(),
+
+            quack_epoch: 0,
 
             log: vec![],
         }
@@ -451,8 +462,30 @@ impl Recovery {
         self.pacer.send(sent_bytes, now);
     }
 
+    fn send_quack_reset(&mut self, addr: SocketAddr) -> Result<()> {
+        // This time threshold should be long enough that if the host and proxy
+        // are not in a valid state at this point, we can assume the previous
+        // reset got lost.
+        let now = Instant::now();
+        if now - self.last_quack_reset > SIDECAR_RESET_THRESHOLD {
+            // Notify the proxy of the reset
+            self.quack_epoch += 1;
+            let sock = UdpSocket::bind("0.0.0.0:0")
+                .map_err(|_| crate::Error::BadQuackResetSocket)?;
+            sock.send_to(&[self.quack_epoch], addr)
+                .map_err(|_| crate::Error::BadQuackResetSocket)?;
+
+            // Reset internal quack state
+            self.last_quack_reset = now;
+            self.quack = Quack::new(self.quack.power_sums.len());
+            self.last_decoded_quack = self.quack.clone();
+            self.log = vec![];
+        }
+        Ok(())
+    }
+
     pub fn on_quack_received(
-        &mut self, quack: Quack,
+        &mut self, quack: Quack, from: SocketAddr,
     ) -> Result<(usize, usize)> {
         // Don't process the quack if it hasn't changed since the last one we
         // received.
@@ -462,25 +495,31 @@ impl Recovery {
             self.last_decoded_quack.count = quack.count;
         }
 
-        // This should never happen, unless the counts overflow (TODO).
+        // Either the counts overflowed, or we sent a RESET packet that hasn't
+        // been synchronized at the proxy yet. Either way, send a RESET if it
+        // has been more than an RTT (of the quack subpath).
         if self.quack.count < quack.count {
-            // return Err(crate::Error::SidecarInvalidQuack);
+            self.send_quack_reset(from)?;
+            return Ok((0, 0));
+        }
+
+        // We can't decode the quACK if the difference in the number of packets
+        // sent and received exceeds the threshold. Send a RESET packet to the
+        // proxy to resynchronize. The host keeps resending RESET packets with
+        // the same quack epoch in response to each quack until it receives a
+        // quack that it can decode.
+        let threshold = self.quack.power_sums.len();
+        let received = quack.count;
+        let missing = self.quack.count - received;
+        if usize::from(missing) > threshold {
+            self.send_quack_reset(from)?;
             return Ok((0, 0));
         }
 
         // We "drain" packets here without going through quack decoding.
         // If the log was already empty, then it must be that missing == 0.
-        if self.quack.count == quack.count {
+        if missing == 0 {
             self.log = vec![];
-            return Ok((0, 0))
-        }
-
-        // We can't decode the quACK if the difference in the number of packets
-        // sent and received exceeds the threshold.
-        let threshold = self.quack.power_sums.len();
-        let received = quack.count;
-        let missing = self.quack.count - received;
-        if usize::from(missing) > threshold {
             return Ok((0, 0));
         }
 
