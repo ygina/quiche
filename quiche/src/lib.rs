@@ -701,6 +701,7 @@ pub struct Config {
 
     sidecar_iface: String,
     sidecar_threshold: usize,
+    quack_reset: bool,
 }
 
 // See https://quicwg.org/base-drafts/rfc9000.html#section-15
@@ -762,6 +763,7 @@ impl Config {
 
             sidecar_iface: String::from(""),
             sidecar_threshold: 0,
+            quack_reset: true,
         })
     }
 
@@ -1102,6 +1104,13 @@ impl Config {
     /// Sets the sidecar quACK threshold.
     pub fn set_sidecar_threshold(&mut self, threshold: usize) {
         self.sidecar_threshold = threshold;
+    }
+
+    /// Configures whether to send quACK reset messages.
+    ///
+    /// The default value is `true`.
+    pub fn enable_quack_reset(&mut self, v: bool) {
+        self.quack_reset = v;
     }
 
     /// Configures whether to enable HyStart++.

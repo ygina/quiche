@@ -182,6 +182,7 @@ pub struct Recovery {
     outstanding_non_ack_eliciting: usize,
 
     sidecar: bool,
+    quack_reset: bool,
     quack: Quack,
     last_decoded_quack: Quack,
     last_quack_reset: Instant,
@@ -197,6 +198,7 @@ pub struct RecoveryConfig {
     pacing: bool,
     sidecar_iface: String,
     sidecar_threshold: usize,
+    quack_reset: bool,
 }
 
 impl RecoveryConfig {
@@ -209,6 +211,7 @@ impl RecoveryConfig {
             pacing: config.pacing,
             sidecar_iface: config.sidecar_iface.clone(),
             sidecar_threshold: config.sidecar_threshold,
+            quack_reset: config.quack_reset,
         }
     }
 }
@@ -313,6 +316,8 @@ impl Recovery {
             outstanding_non_ack_eliciting: 0,
 
             sidecar: recovery_config.sidecar_threshold > 0,
+
+            quack_reset: recovery_config.quack_reset,
 
             quack: Quack::new(recovery_config.sidecar_threshold),
 
@@ -463,6 +468,10 @@ impl Recovery {
     }
 
     fn send_quack_reset(&mut self, addr: SocketAddr) -> Result<()> {
+        if !self.quack_reset {
+            return Ok(());
+        }
+
         // This time threshold should be long enough that if the host and proxy
         // are not in a valid state at this point, we can assume the previous
         // reset got lost.
