@@ -218,6 +218,9 @@ void quiche_config_set_sidecar_threshold(quiche_config *config, size_t threshold
 // Configures whether to send quACK reset messages.
 void quiche_config_enable_quack_reset(quiche_config *config, bool v);
 
+// Configures whether to send packets only if cwnd > mtu.
+void quiche_config_enable_sidecar_mtu(quiche_config *config, bool v);
+
 // Configures whether to use HyStart++.
 void quiche_config_enable_hystart(quiche_config *config, bool v);
 

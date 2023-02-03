@@ -702,6 +702,7 @@ pub struct Config {
     sidecar_iface: String,
     sidecar_threshold: usize,
     quack_reset: bool,
+    sidecar_mtu: bool,
 }
 
 // See https://quicwg.org/base-drafts/rfc9000.html#section-15
@@ -764,6 +765,7 @@ impl Config {
             sidecar_iface: String::from(""),
             sidecar_threshold: 0,
             quack_reset: true,
+            sidecar_mtu: false,
         })
     }
 
@@ -1113,6 +1115,13 @@ impl Config {
         self.quack_reset = v;
     }
 
+    /// Configures whether to send packets only if cwnd > mtu.
+    ///
+    /// The default value is `false`.
+    pub fn enable_sidecar_mtu(&mut self, v: bool) {
+        self.sidecar_mtu = v;
+    }
+
     /// Configures whether to enable HyStart++.
     ///
     /// The default value is `true`.
@@ -1368,6 +1377,9 @@ pub struct Connection {
     /// Whether the connection should prevent from reusing destination
     /// Connection IDs when the peer migrates.
     disable_dcid_reuse: bool,
+
+    /// Send packets only if cwnd > mtu.
+    sidecar_mtu: bool,
 }
 
 /// Creates a new server-side connection.
@@ -1802,6 +1814,8 @@ impl Connection {
             emit_dgram: true,
 
             disable_dcid_reuse: config.disable_dcid_reuse,
+
+            sidecar_mtu: config.sidecar_mtu,
         };
 
         if let Some(odcid) = odcid {
@@ -3414,15 +3428,19 @@ impl Connection {
         }
 
         // Limit output packet size by congestion window size.
-        left = cmp::min(
-            left,
-            self.paths
-                .get(send_pid)?
-                .recovery
-                .cwnd_available()
-                .saturating_sub(overhead)
-                .saturating_sub(left_before_packing_ack_frame - left), /* bytes consumed by ACK frames */
-        );
+        let cwnd_available = self.paths
+            .get(send_pid)?
+            .recovery
+            .cwnd_available()
+            .saturating_sub(overhead)
+            .saturating_sub(left_before_packing_ack_frame - left); /* bytes consumed by ACK frames */
+        if self.sidecar_mtu {
+            if cwnd_available < left {
+                left = 0;
+            }
+        } else {
+            left = cmp::min(left, cwnd_available);
+        }
 
         let mut challenge_data = None;
 

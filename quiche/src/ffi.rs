@@ -348,6 +348,11 @@ pub extern fn quiche_config_enable_quack_reset(config: &mut Config, v: bool) {
 }
 
 #[no_mangle]
+pub extern fn quiche_config_enable_sidecar_mtu(config: &mut Config, v: bool) {
+    config.enable_sidecar_mtu(v);
+}
+
+#[no_mangle]
 pub extern fn quiche_config_enable_hystart(config: &mut Config, v: bool) {
     config.enable_hystart(v);
 }
