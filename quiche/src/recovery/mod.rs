@@ -464,7 +464,8 @@ impl Recovery {
 
         // This should never happen, unless the counts overflow (TODO).
         if self.quack.count < quack.count {
-            return Err(crate::Error::SidecarInvalidQuack);
+            // return Err(crate::Error::SidecarInvalidQuack);
+            return Ok((0, 0));
         }
 
         // We "drain" packets here without going through quack decoding.
