@@ -48,7 +48,10 @@ use crate::ranges;
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
 
-use quack::{DecodedQuack, PowerSumQuack, arithmetic::MonicPolynomialEvaluator};
+use quack::{
+    Quack, PowerSumQuack,
+    arithmetic::MonicPolynomialEvaluator,
+};
 use smallvec::SmallVec;
 
 // Loss Recovery
@@ -184,7 +187,7 @@ pub struct Recovery {
     sidecar: bool,
     quack_reset: bool,
     quack: PowerSumQuack,
-    last_decoded_quack: PowerSumQuack,
+    last_decoded_quack_count: u16,
     last_quack_reset: Instant,
     quack_epoch: u8,
     log: Vec<(u32, Instant, packet::Epoch)>,
@@ -321,7 +324,7 @@ impl Recovery {
 
             quack: PowerSumQuack::new(recovery_config.sidecar_threshold),
 
-            last_decoded_quack: PowerSumQuack::new(recovery_config.sidecar_threshold),
+            last_decoded_quack_count: 0,
 
             last_quack_reset: Instant::now(),
 
@@ -486,8 +489,8 @@ impl Recovery {
 
             // Reset internal quack state
             self.last_quack_reset = now;
-            self.quack = PowerSumQuack::new(self.quack.power_sums.len());
-            self.last_decoded_quack = self.quack.clone();
+            self.quack = PowerSumQuack::new(self.quack.threshold());
+            self.last_decoded_quack_count = 0;
             self.log = vec![];
         }
         Ok(())
@@ -498,16 +501,16 @@ impl Recovery {
     ) -> Result<(usize, usize)> {
         // Don't process the quack if it hasn't changed since the last one we
         // received.
-        if self.last_decoded_quack.count == quack.count {
+        if self.last_decoded_quack_count == quack.count() {
             return Ok((0, 0));
         } else {
-            self.last_decoded_quack.count = quack.count;
+            self.last_decoded_quack_count = quack.count();
         }
 
         // Either the counts overflowed, or we sent a RESET packet that hasn't
         // been synchronized at the proxy yet. Either way, send a RESET if it
         // has been more than an RTT (of the quack subpath).
-        if self.quack.count < quack.count {
+        if self.quack.count() < quack.count() {
             self.send_quack_reset(from)?;
             return Ok((0, 0));
         }
@@ -517,9 +520,9 @@ impl Recovery {
         // proxy to resynchronize. The host keeps resending RESET packets with
         // the same quack epoch in response to each quack until it receives a
         // quack that it can decode.
-        let threshold = self.quack.power_sums.len();
-        let received = quack.count;
-        let missing = self.quack.count - received;
+        let threshold = self.quack.threshold();
+        let received = quack.count();
+        let missing = self.quack.count() - received;
         if usize::from(missing) > threshold {
             self.send_quack_reset(from)?;
             return Ok((0, 0));
@@ -561,8 +564,8 @@ impl Recovery {
         // // actually received. We can check this by showing we can't factor the
         // // coefficients from the difference quACK.
         // let threshold = self.quack.power_sums.len();
-        // let received = quack.count;
-        // let missing = self.quack.count - quack.count;
+        // let received = quack.count();
+        // let missing = self.quack.count() - quack.count();
         // let mut diff_quack = self.quack.clone() - quack;
         // let mut suffix = 0;
         // let coeffs = {
@@ -579,7 +582,7 @@ impl Recovery {
         //         // }
         //         return Ok((0, 0));
         //     }
-        //     DecodedQuack::to_coeffs(&diff_quack)
+        //     diff_quack.to_coeffs()
         // };
 
         // Find the missing packets that are not in the suffix.
@@ -587,7 +590,7 @@ impl Recovery {
         let mut suffix = 0;
         let coeffs = {
             let diff_quack = self.quack.clone() - quack;
-            DecodedQuack::to_coeffs(&diff_quack)
+            diff_quack.to_coeffs()
         };
         {
             let mut in_suffix = true;
@@ -625,7 +628,7 @@ impl Recovery {
         //     missing_ids.len(),
         //     suffix,
         //     missing,
-        //     self.quack.count,
+        //     self.quack.count(),
         //     self.log.len(),
         //     MonicPolynomialEvaluator::factor(&coeffs).is_ok(),
         //     missing_ids,
