@@ -48,7 +48,7 @@ use crate::ranges;
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
 
-use quack::{DecodedQuack, Quack, arithmetic::MonicPolynomialEvaluator};
+use quack::{DecodedQuack, PowerSumQuack, arithmetic::MonicPolynomialEvaluator};
 use smallvec::SmallVec;
 
 // Loss Recovery
@@ -183,8 +183,8 @@ pub struct Recovery {
 
     sidecar: bool,
     quack_reset: bool,
-    quack: Quack,
-    last_decoded_quack: Quack,
+    quack: PowerSumQuack,
+    last_decoded_quack: PowerSumQuack,
     last_quack_reset: Instant,
     quack_epoch: u8,
     log: Vec<(u32, Instant, packet::Epoch)>,
@@ -319,9 +319,9 @@ impl Recovery {
 
             quack_reset: recovery_config.quack_reset,
 
-            quack: Quack::new(recovery_config.sidecar_threshold),
+            quack: PowerSumQuack::new(recovery_config.sidecar_threshold),
 
-            last_decoded_quack: Quack::new(recovery_config.sidecar_threshold),
+            last_decoded_quack: PowerSumQuack::new(recovery_config.sidecar_threshold),
 
             last_quack_reset: Instant::now(),
 
@@ -486,7 +486,7 @@ impl Recovery {
 
             // Reset internal quack state
             self.last_quack_reset = now;
-            self.quack = Quack::new(self.quack.power_sums.len());
+            self.quack = PowerSumQuack::new(self.quack.power_sums.len());
             self.last_decoded_quack = self.quack.clone();
             self.log = vec![];
         }
@@ -494,7 +494,7 @@ impl Recovery {
     }
 
     pub fn on_quack_received(
-        &mut self, quack: Quack, from: SocketAddr,
+        &mut self, quack: PowerSumQuack, from: SocketAddr,
     ) -> Result<(usize, usize)> {
         // Don't process the quack if it hasn't changed since the last one we
         // received.

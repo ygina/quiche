@@ -101,7 +101,7 @@ use winapi::shared::ws2ipdef::SOCKADDR_IN6_LH_u;
 use crate::*;
 
 use bincode;
-use quack::Quack;
+use quack::PowerSumQuack;
 
 #[no_mangle]
 pub extern fn quiche_version() -> *const u8 {
@@ -738,7 +738,7 @@ pub extern fn quiche_conn_recv_quack(
         return;
     }
     let buf = unsafe { slice::from_raw_parts_mut(quack_buf, quack_buf_len) };
-    let quack: Quack = bincode::deserialize(&buf).unwrap();
+    let quack: PowerSumQuack = bincode::deserialize(&buf).unwrap();
     let conn: &mut Connection = unsafe { &mut *conn };
     let from = std_addr_from_c(addr, addr_len);
     conn.recv_quack(quack, from).unwrap();

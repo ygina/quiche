@@ -376,7 +376,7 @@ use std::str::FromStr;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 
-use quack::Quack;
+use quack::PowerSumQuack;
 use sidecar::ID_OFFSET;
 use smallvec::SmallVec;
 
@@ -1998,7 +1998,11 @@ impl Connection {
     }
 
     /// Process quACKs received from a sidecar.
-    pub fn recv_quack(&mut self, quack: Quack, from: SocketAddr) -> Result<()> {
+    pub fn recv_quack(
+        &mut self,
+        quack: PowerSumQuack,
+        from: SocketAddr,
+    ) -> Result<()> {
         if self.paths.len() != 1 {
             return Err(Error::SidecarMultiplePaths);
         }
