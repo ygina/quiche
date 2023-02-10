@@ -51,6 +51,9 @@ cwnd_log = []
 # Log the sidecar identifier when it is inserted in a quACK.
 quack_log = []
 
+# Debug logging when quacks are received
+debug = []
+
 [package.metadata.docs.rs]
 no-default-features = true
 features = ["boringssl-boring-crate", "qlog"]

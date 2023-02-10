@@ -257,6 +257,8 @@ fn bbr_enter_recovery(r: &mut Recovery, now: Instant) {
 
     r.congestion_window = r.bytes_in_flight +
         r.bbr_state.newly_acked_bytes.max(r.max_datagram_size);
+    #[cfg(feature = "cwnd_log")]
+    println!("cwnd {} {:?} (bbr::bbr_enter_recovery)", r.congestion_window, std::time::Instant::now());
     r.congestion_recovery_start_time = Some(now);
 
     r.bbr_state.packet_conservation = true;

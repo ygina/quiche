@@ -157,6 +157,8 @@ pub fn bbr_save_cwnd(r: &mut Recovery) -> usize {
 
 pub fn bbr_restore_cwnd(r: &mut Recovery) {
     r.congestion_window = r.congestion_window.max(r.bbr_state.prior_cwnd);
+    #[cfg(feature = "cwnd_log")]
+    println!("cwnd {} {:?} (bbr::bbr_restore_cwnd)", r.congestion_window, std::time::Instant::now());
 }
 
 fn bbr_modulate_cwnd_for_recovery(r: &mut Recovery) {
@@ -169,18 +171,24 @@ fn bbr_modulate_cwnd_for_recovery(r: &mut Recovery) {
             .congestion_window
             .saturating_sub(lost_bytes)
             .max(r.max_datagram_size * recovery::MINIMUM_WINDOW_PACKETS);
+        #[cfg(feature = "cwnd_log")]
+        println!("cwnd {} {:?} (bbr::bbr_modulate_cwnd_for_recovery 1)", r.congestion_window, std::time::Instant::now());
     }
 
     if r.bbr_state.packet_conservation {
         r.congestion_window =
             r.congestion_window.max(r.bytes_in_flight + acked_bytes);
+        #[cfg(feature = "cwnd_log")]
+        println!("cwnd {} {:?} (bbr::bbr_modulate_cwnd_for_recovery 2)", r.congestion_window, std::time::Instant::now());
     }
 }
 
 // 4.2.3.5 Modulating cwnd in ProbeRTT
 fn bbr_modulate_cwnd_for_probe_rtt(r: &mut Recovery) {
     if r.bbr_state.state == BBRStateMachine::ProbeRTT {
-        r.congestion_window = r.congestion_window.min(bbr_min_pipe_cwnd(r))
+        r.congestion_window = r.congestion_window.min(bbr_min_pipe_cwnd(r));
+        #[cfg(feature = "cwnd_log")]
+        println!("cwnd {} {:?} (bbr::bbr_modulate_cwnd_for_probe_rtt)", r.congestion_window, std::time::Instant::now());
     }
 }
 
@@ -196,15 +204,21 @@ fn bbr_set_cwnd(r: &mut Recovery) {
             r.congestion_window = cmp::min(
                 r.congestion_window + acked_bytes,
                 r.bbr_state.target_cwnd,
-            )
+            );
+            #[cfg(feature = "cwnd_log")]
+            println!("cwnd {} {:?} (bbr::bbr_set_cwnd 1)", r.congestion_window, std::time::Instant::now());
         } else if r.congestion_window < r.bbr_state.target_cwnd ||
             r.delivery_rate.delivered() <
                 r.max_datagram_size * INITIAL_WINDOW_PACKETS
         {
             r.congestion_window += acked_bytes;
+            #[cfg(feature = "cwnd_log")]
+            println!("cwnd {} {:?} (bbr::bbr_set_cwnd 2)", r.congestion_window, std::time::Instant::now());
         }
 
-        r.congestion_window = r.congestion_window.max(bbr_min_pipe_cwnd(r))
+        r.congestion_window = r.congestion_window.max(bbr_min_pipe_cwnd(r));
+        #[cfg(feature = "cwnd_log")]
+        println!("cwnd {} {:?} (bbr::bbr_set_cwnd 3)", r.congestion_window, std::time::Instant::now());
     }
 
     bbr_modulate_cwnd_for_probe_rtt(r);
