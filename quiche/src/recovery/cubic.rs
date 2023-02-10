@@ -66,10 +66,10 @@ const C: f64 = 0.4;
 
 /// Threshold for rolling back state, as percentage of lost packets relative to
 /// cwnd.
-const ROLLBACK_THRESHOLD_PERCENT: usize = 20;
+const _ROLLBACK_THRESHOLD_PERCENT: usize = 20;
 
 /// Minimum threshold for rolling back state, as number of packets.
-const MIN_ROLLBACK_THRESHOLD: usize = 2;
+const _MIN_ROLLBACK_THRESHOLD: usize = 2;
 
 /// Default value of alpha_aimd in the beginning of congestion avoidance.
 const ALPHA_AIMD: f64 = 3.0 * (1.0 - BETA_CUBIC) / (1.0 + BETA_CUBIC);
@@ -226,6 +226,7 @@ fn on_packet_acked(
         return;
     }
 
+    /*
     // Detecting spurious congestion events.
     // <https://tools.ietf.org/id/draft-ietf-tcpm-rfc8312bis-00.html#section-4.9>
     //
@@ -247,6 +248,7 @@ fn on_packet_acked(
             }
         }
     }
+    */
 
     if r.congestion_window < r.ssthresh {
         // In Slow slart, bytes_acked_sl is used for counting
