@@ -189,6 +189,14 @@ pub struct Recovery {
     quack: PowerSumQuack,
     last_decoded_quack_count: u16,
     last_quack_reset: Instant,
+
+    #[cfg(feature = "debug")]
+    stats_first_reset_message: Option<Instant>,
+    #[cfg(feature = "debug")]
+    stats_min_quack_reset: Option<Duration>,
+    #[cfg(feature = "debug")]
+    stats_max_quack_reset: Duration,
+
     quack_epoch: u8,
     log: Vec<(u32, Instant, packet::Epoch)>,
 }
@@ -327,6 +335,15 @@ impl Recovery {
             last_decoded_quack_count: 0,
 
             last_quack_reset: Instant::now(),
+
+            #[cfg(feature = "debug")]
+            stats_first_reset_message: None,
+
+            #[cfg(feature = "debug")]
+            stats_min_quack_reset: None,
+
+            #[cfg(feature = "debug")]
+            stats_max_quack_reset: Duration::from_millis(1),
 
             quack_epoch: 0,
 
@@ -480,6 +497,13 @@ impl Recovery {
         // reset got lost.
         let now = Instant::now();
         if now - self.last_quack_reset > SIDECAR_RESET_THRESHOLD {
+            #[cfg(feature = "debug")]
+            println!("reset");
+            #[cfg(feature = "debug")]
+            if self.stats_first_reset_message.is_none() {
+                self.stats_first_reset_message = Some(now);
+            }
+
             // Notify the proxy of the reset
             self.quack_epoch += 1;
             let sock = UdpSocket::bind("0.0.0.0:0")
@@ -511,6 +535,9 @@ impl Recovery {
         // been synchronized at the proxy yet. Either way, send a RESET if it
         // has been more than an RTT (of the quack subpath).
         if self.quack.count() < quack.count() {
+            #[cfg(feature = "debug")]
+            println!("overflowed or sender hasn't processed reset, expected {} < {}",
+                quack.count(), self.quack.count());
             self.send_quack_reset(from)?;
             return Ok((0, 0));
         }
@@ -526,6 +553,24 @@ impl Recovery {
         if usize::from(missing) > threshold {
             self.send_quack_reset(from)?;
             return Ok((0, 0));
+        }
+
+        #[cfg(feature = "debug")]
+        if let Some(reset_time) = self.stats_first_reset_message {
+            // Took this long to reset
+            let t = Instant::now() - reset_time;
+            if t > self.stats_max_quack_reset {
+                self.stats_max_quack_reset = t;
+            }
+            if let Some(mqr) = self.stats_min_quack_reset {
+                if t < mqr {
+                    self.stats_min_quack_reset = Some(t);
+                }
+            } else {
+                self.stats_min_quack_reset = Some(t);
+            }
+            self.stats_first_reset_message = None;
+            println!("reset quack after {:?} (max {:?})", t, self.stats_max_quack_reset);
         }
 
         // We "drain" packets here without going through quack decoding.
@@ -623,16 +668,19 @@ impl Recovery {
             }
         }
 
-        // println!(
-        //     "found {}+{}/{} missing (sent={}) (log {}) factored? {} {:?}",
-        //     missing_ids.len(),
-        //     suffix,
-        //     missing,
-        //     self.quack.count(),
-        //     self.log.len(),
-        //     MonicPolynomialEvaluator::factor(&coeffs).is_ok(),
-        //     missing_ids,
-        // );
+        #[cfg(feature = "debug")]
+        if self.quack_epoch > 0 {
+            println!(
+                "found {}+{}/{} missing (sent={}) (log {}) factored? {} {:?}",
+                missing_ids.len(),
+                suffix,
+                missing,
+                self.quack.count(),
+                self.log.len(),
+                MonicPolynomialEvaluator::factor(&coeffs).is_ok(),
+                missing_ids,
+            );
+        }
 
         // For packets considered missing (anything not in the suffix), mark it
         // as lost and add it to self.lost[epoch] for retransmission.
