@@ -209,9 +209,6 @@ enum quiche_cc_algorithm {
 // Sets the congestion control algorithm used.
 void quiche_config_set_cc_algorithm(quiche_config *config, enum quiche_cc_algorithm algo);
 
-// Sets the sidecar interface that packets are sent on.
-void quiche_config_set_sidecar_iface(quiche_config *config, const char *iface);
-
 // Sets the sidecar quACK threshold.
 void quiche_config_set_sidecar_threshold(quiche_config *config, size_t threshold);
 

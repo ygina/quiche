@@ -54,13 +54,13 @@ use quack::{
 };
 use smallvec::SmallVec;
 
-// Loss Recovery
-const SIDECAR_IGNORE_THRESHOLD: usize = 10000;
-
 const SIDECAR_RESET_THRESHOLD: Duration = Duration::from_millis(10);
 
-// For the e2e loss detection timeout it's RRT * packet thresh
-const SIDECAR_LINK2_LOSS_DELAY: Duration = Duration::from_millis(3);
+// // For the e2e loss detection timeout it's RRT * packet thresh
+// const SIDECAR_LINK2_LOSS_DELAY: Duration = Duration::from_millis(3);
+
+// // Loss Recovery
+// const SIDECAR_IGNORE_THRESHOLD: usize = 10000;
 
 const INITIAL_PACKET_THRESHOLD: u64 = 3;
 
@@ -207,7 +207,6 @@ pub struct RecoveryConfig {
     cc_ops: &'static CongestionControlOps,
     hystart: bool,
     pacing: bool,
-    sidecar_iface: String,
     sidecar_threshold: usize,
     quack_reset: bool,
 }
@@ -220,7 +219,6 @@ impl RecoveryConfig {
             cc_ops: config.cc_algorithm.into(),
             hystart: config.hystart,
             pacing: config.pacing,
-            sidecar_iface: config.sidecar_iface.clone(),
             sidecar_threshold: config.sidecar_threshold,
             quack_reset: config.quack_reset,
         }

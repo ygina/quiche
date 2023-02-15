@@ -328,14 +328,6 @@ pub extern fn quiche_config_set_cc_algorithm(
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_sidecar_iface(
-    config: &mut Config, iface: *const c_char,
-) {
-    let iface = unsafe { ffi::CStr::from_ptr(iface).to_str().unwrap() };
-    config.set_sidecar_iface(iface.to_string());
-}
-
-#[no_mangle]
 pub extern fn quiche_config_set_sidecar_threshold(
     config: &mut Config, threshold: size_t,
 ) {

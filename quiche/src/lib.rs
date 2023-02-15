@@ -530,12 +530,6 @@ pub enum Error {
     /// Sidecar is enabled while there are multiple paths.
     SidecarMultiplePaths,
 
-    /// Received a quACK that has processed more packets than we have sent.
-    SidecarInvalidQuack,
-
-    /// Received a quACK where the difference exceeds our threshold.
-    SidecarThresholdExceeded,
-
     /// Failed to send a quACK reset message.
     BadQuackResetSocket,
 }
@@ -576,9 +570,7 @@ impl Error {
             Error::IdLimit => -17,
             Error::OutOfIdentifiers => -18,
             Error::SidecarMultiplePaths => -19,
-            Error::SidecarInvalidQuack => -20,
-            Error::SidecarThresholdExceeded => -21,
-            Error::BadQuackResetSocket => -22,
+            Error::BadQuackResetSocket => -20,
         }
     }
 }
@@ -699,7 +691,6 @@ pub struct Config {
 
     disable_dcid_reuse: bool,
 
-    sidecar_iface: String,
     sidecar_threshold: usize,
     quack_reset: bool,
     sidecar_mtu: bool,
@@ -762,7 +753,6 @@ impl Config {
 
             disable_dcid_reuse: false,
 
-            sidecar_iface: String::from(""),
             sidecar_threshold: 0,
             quack_reset: true,
             sidecar_mtu: false,
@@ -1096,11 +1086,6 @@ impl Config {
     /// The default value is `CongestionControlAlgorithm::CUBIC`.
     pub fn set_cc_algorithm(&mut self, algo: CongestionControlAlgorithm) {
         self.cc_algorithm = algo;
-    }
-
-    /// Sets the sidecar interface that packets are sent on.
-    pub fn set_sidecar_iface(&mut self, iface: String) {
-        self.sidecar_iface = iface;
     }
 
     /// Sets the sidecar quACK threshold.
