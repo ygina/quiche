@@ -439,9 +439,9 @@ impl Recovery {
             .on_packet_sent(&mut pkt, self.bytes_in_flight - sent_bytes);
 
         if self.sidecar {
-            #[cfg(feature = "quack_log")]
-            println!("quack {:?} {}", std::time::Instant::now(), pkt.sidecar_id);
             self.quack.insert(pkt.sidecar_id);
+            #[cfg(feature = "quack_log")]
+            println!("quack {:?} {} {}", std::time::Instant::now(), pkt.sidecar_id, self.quack.count());
             self.log.push((pkt.sidecar_id, pkt.time_sent, epoch));
         }
 
@@ -678,6 +678,11 @@ impl Recovery {
                 MonicPolynomialEvaluator::factor(&coeffs).is_ok(),
                 missing_ids,
             );
+        }
+
+        #[cfg(feature = "quack_log")]
+        for id in &missing_ids {
+            println!("lost {:?} {} (on_quack_received)", Instant::now(), id);
         }
 
         // For packets considered missing (anything not in the suffix), mark it
