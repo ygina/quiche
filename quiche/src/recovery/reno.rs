@@ -88,11 +88,11 @@ fn on_packet_acked(
         if r.hystart.in_css(epoch) {
             r.congestion_window += r.hystart.css_cwnd_inc(r.max_datagram_size);
             #[cfg(feature = "cwnd_log")]
-            println!("cwnd {} {:?} (reno::on_packet_acked 1)", r.congestion_window, std::time::Instant::now());
+            println!("cwnd {} {:?} (reno::on_packet_acked 1)", r.cwnd(), std::time::Instant::now());
         } else {
             r.congestion_window += r.max_datagram_size;
             #[cfg(feature = "cwnd_log")]
-            println!("cwnd {} {:?} (reno::on_packet_acked 2)", r.congestion_window, std::time::Instant::now());
+            println!("cwnd {} {:?} (reno::on_packet_acked 2)", r.cwnd(), std::time::Instant::now());
         }
 
         if r.hystart.on_packet_acked(epoch, packet, r.latest_rtt, now) {
@@ -107,7 +107,7 @@ fn on_packet_acked(
             r.bytes_acked_ca -= r.congestion_window;
             r.congestion_window += r.max_datagram_size;
             #[cfg(feature = "cwnd_log")]
-            println!("cwnd {} {:?} (reno::on_packet_acked 3)", r.congestion_window, std::time::Instant::now());
+            println!("cwnd {} {:?} (reno::on_packet_acked 3)", r.cwnd(), std::time::Instant::now());
         }
     }
 }
@@ -130,7 +130,7 @@ fn congestion_event(
             r.max_datagram_size * recovery::MINIMUM_WINDOW_PACKETS,
         );
         #[cfg(feature = "cwnd_log")]
-        println!("cwnd {} {:?} (reno::congestion_event)", r.congestion_window, std::time::Instant::now());
+        println!("cwnd {} {:?} (reno::congestion_event)", r.cwnd(), std::time::Instant::now());
 
         r.bytes_acked_ca = (r.congestion_window as f64 *
             recovery::LOSS_REDUCTION_FACTOR) as usize;
@@ -146,7 +146,7 @@ fn congestion_event(
 pub fn collapse_cwnd(r: &mut Recovery) {
     r.congestion_window = r.max_datagram_size * recovery::MINIMUM_WINDOW_PACKETS;
     #[cfg(feature = "cwnd_log")]
-    println!("cwnd {} {:?} (reno::collapse_cwnd)", r.congestion_window, std::time::Instant::now());
+    println!("cwnd {} {:?} (reno::collapse_cwnd)", r.cwnd(), std::time::Instant::now());
     r.bytes_acked_sl = 0;
     r.bytes_acked_ca = 0;
 

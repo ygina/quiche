@@ -403,7 +403,7 @@ impl Recovery {
             self.in_flight_count[epoch] += 1;
 
             self.update_app_limited(
-                (self.bytes_in_flight + sent_bytes) < self.congestion_window,
+                (self.bytes_in_flight + sent_bytes) < self.cwnd(),
             );
 
             self.on_packet_sent_cc(sent_bytes, now);
@@ -416,7 +416,7 @@ impl Recovery {
         // HyStart++: Start of the round in a slow start.
         if self.hystart.enabled() &&
             epoch == packet::Epoch::Application &&
-            self.congestion_window < self.ssthresh
+            self.cwnd() < self.ssthresh
         {
             self.hystart.start_round(pkt_num);
         }
@@ -424,7 +424,7 @@ impl Recovery {
         // Pacing: Set the pacing rate if CC doesn't do its own.
         if !(self.cc_ops.has_custom_pacing)() {
             if let Some(srtt) = self.smoothed_rtt {
-                let rate = PACING_MULTIPLIER * self.congestion_window as f64 /
+                let rate = PACING_MULTIPLIER * self.cwnd() as f64 /
                     srtt.as_secs_f64();
                 self.set_pacing_rate(rate as u64, now);
             }
@@ -1017,7 +1017,7 @@ impl Recovery {
         }
 
         // Open more space (snd_cnt) for PRR when allowed.
-        self.congestion_window.saturating_sub(self.bytes_in_flight) +
+        self.cwnd().saturating_sub(self.bytes_in_flight) +
             self.prr.snd_cnt
     }
 
@@ -1046,13 +1046,14 @@ impl Recovery {
             self.max_datagram_size * INITIAL_WINDOW_PACKETS
         {
             self.congestion_window = max_datagram_size * INITIAL_WINDOW_PACKETS;
+            self.near_congestion_window = self.congestion_window;
             #[cfg(feature = "cwnd_log")]
-            println!("cwnd {} {:?} (update_max_datagram_size)", self.congestion_window, std::time::Instant::now());
+            println!("cwnd {} {:?} (update_max_datagram_size)", self.cwnd(), std::time::Instant::now());
         }
 
         self.pacer = pacer::Pacer::new(
             self.pacer.enabled(),
-            self.congestion_window,
+            self.cwnd(),
             0,
             max_datagram_size,
         );
@@ -1492,7 +1493,7 @@ impl std::fmt::Debug for Recovery {
         write!(f, "rttvar={:?} ", self.rttvar)?;
         write!(f, "loss_time={:?} ", self.loss_time)?;
         write!(f, "loss_probes={:?} ", self.loss_probes)?;
-        write!(f, "cwnd={} ", self.congestion_window)?;
+        write!(f, "cwnd={} ", self.cwnd())?;
         write!(f, "ssthresh={} ", self.ssthresh)?;
         write!(f, "bytes_in_flight={} ", self.bytes_in_flight)?;
         write!(f, "app_limited={} ", self.app_limited)?;
