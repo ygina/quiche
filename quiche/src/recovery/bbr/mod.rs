@@ -323,7 +323,7 @@ fn on_packets_acked(
 
 fn congestion_event(
     r: &mut Recovery, lost_bytes: usize, time_sent: Instant,
-    _epoch: packet::Epoch, now: Instant,
+    _epoch: packet::Epoch, now: Instant, _metadata: Option<QuackMetadata>,
 ) {
     r.bbr_state.newly_lost_bytes = lost_bytes;
 

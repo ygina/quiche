@@ -43,6 +43,7 @@ use crate::recovery::reno;
 use crate::recovery::Acked;
 use crate::recovery::CongestionControlOps;
 use crate::recovery::Recovery;
+use crate::recovery::QuackMetadata;
 
 pub static CUBIC: CongestionControlOps = CongestionControlOps {
     on_init,
@@ -356,8 +357,12 @@ fn on_packet_acked(
 
 fn congestion_event(
     r: &mut Recovery, _lost_bytes: usize, time_sent: Instant,
-    epoch: packet::Epoch, now: Instant,
+    epoch: packet::Epoch, now: Instant, metadata: Option<QuackMetadata>,
 ) {
+    if metadata.is_some() {
+        return;
+    }
+
     let in_congestion_recovery = r.in_congestion_recovery(time_sent);
 
     // Start a new congestion event if packet was sent after the

@@ -37,6 +37,7 @@ use crate::recovery;
 use crate::recovery::Acked;
 use crate::recovery::CongestionControlOps;
 use crate::recovery::Recovery;
+use crate::recovery::QuackMetadata;
 
 pub static RENO: CongestionControlOps = CongestionControlOps {
     on_init,
@@ -114,7 +115,7 @@ fn on_packet_acked(
 
 fn congestion_event(
     r: &mut Recovery, _lost_bytes: usize, time_sent: Instant,
-    epoch: packet::Epoch, now: Instant,
+    epoch: packet::Epoch, now: Instant, _metadata: Option<QuackMetadata>,
 ) {
     // Start a new congestion event if packet was sent after the
     // start of the previous congestion recovery period.

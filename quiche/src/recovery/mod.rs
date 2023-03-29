@@ -713,6 +713,7 @@ impl Recovery {
             .iter_mut()
             // .take_while(|p| p.pkt_num <= largest_acked)
             .filter(|p| p.time_acked.is_none());
+        let mut largest_lost_pkt = None;
         for unacked in unacked_iter {
             if set.is_empty() {
                 break;
@@ -730,7 +731,7 @@ impl Recovery {
                     unacked.time_lost = Some(now);
                     if unacked.in_flight {
                         lost_bytes += unacked.size;
-                        // largest_lost_pkt = Some(unacked.clone()
+                        largest_lost_pkt = Some(unacked.clone());
                         self.in_flight_count[epoch] =
                             self.in_flight_count[epoch].saturating_sub(1);
                     }
@@ -739,9 +740,14 @@ impl Recovery {
                 }
             }
         }
-        self.bytes_in_flight = self.bytes_in_flight.saturating_sub(lost_bytes);
         self.bytes_lost += lost_bytes as u64;
         // TODO: call on_packets_lost() to adjust cwnd?
+        if let Some(pkt) = largest_lost_pkt {
+            let metadata = QuackMetadata {};
+            self.on_packets_lost(lost_bytes, &pkt, epoch, now, Some(metadata));
+            #[cfg(feature = "cwnd_log")]
+            println!("cwnd {} {:?} (on_quack_received)", self.cwnd(), std::time::Instant::now());
+        }
 
         // Other missing IDs are not in the sent data structure, possibly
         // because they have already been drained after being marked as lost
@@ -1046,7 +1052,6 @@ impl Recovery {
             self.max_datagram_size * INITIAL_WINDOW_PACKETS
         {
             self.congestion_window = max_datagram_size * INITIAL_WINDOW_PACKETS;
-            self.near_congestion_window = self.congestion_window;
             #[cfg(feature = "cwnd_log")]
             println!("cwnd {} {:?} (update_max_datagram_size)", self.cwnd(), std::time::Instant::now());
         }
@@ -1261,7 +1266,7 @@ impl Recovery {
         self.bytes_lost += lost_bytes as u64;
 
         if let Some(pkt) = largest_lost_pkt {
-            self.on_packets_lost(lost_bytes, &pkt, epoch, now);
+            self.on_packets_lost(lost_bytes, &pkt, epoch, now, None);
         }
 
         self.drain_packets(epoch, now);
@@ -1333,11 +1338,11 @@ impl Recovery {
 
     fn on_packets_lost(
         &mut self, lost_bytes: usize, largest_lost_pkt: &Sent,
-        epoch: packet::Epoch, now: Instant,
+        epoch: packet::Epoch, now: Instant, metadata: Option<QuackMetadata>,
     ) {
         self.bytes_in_flight = self.bytes_in_flight.saturating_sub(lost_bytes);
 
-        self.congestion_event(lost_bytes, largest_lost_pkt.time_sent, epoch, now);
+        self.congestion_event(lost_bytes, largest_lost_pkt.time_sent, epoch, now, metadata);
 
         if self.in_persistent_congestion(largest_lost_pkt.pkt_num) {
             self.collapse_cwnd();
@@ -1346,13 +1351,13 @@ impl Recovery {
 
     fn congestion_event(
         &mut self, lost_bytes: usize, time_sent: Instant, epoch: packet::Epoch,
-        now: Instant,
+        now: Instant, metadata: Option<QuackMetadata>,
     ) {
         if !self.in_congestion_recovery(time_sent) {
             (self.cc_ops.checkpoint)(self);
         }
 
-        (self.cc_ops.congestion_event)(self, lost_bytes, time_sent, epoch, now);
+        (self.cc_ops.congestion_event)(self, lost_bytes, time_sent, epoch, now, metadata);
     }
 
     fn collapse_cwnd(&mut self) {
@@ -1424,6 +1429,10 @@ impl FromStr for CongestionControlAlgorithm {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct QuackMetadata {
+}
+
 pub struct CongestionControlOps {
     pub on_init: fn(r: &mut Recovery),
 
@@ -1444,6 +1453,7 @@ pub struct CongestionControlOps {
         time_sent: Instant,
         epoch: packet::Epoch,
         now: Instant,
+        metadata: Option<QuackMetadata>,
     ),
 
     pub collapse_cwnd: fn(r: &mut Recovery),
