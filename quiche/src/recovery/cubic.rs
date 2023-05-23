@@ -114,6 +114,8 @@ struct PriorState {
 
     epoch_start: Option<Instant>,
 
+    quack_metadata: Option<QuackMetadata>,
+
     lost_count: usize,
 }
 
@@ -124,18 +126,18 @@ struct PriorState {
 /// Unit of t (duration) and RTT are based on seconds (f64).
 impl State {
     // K = cubic_root ((w_max - cwnd) / C) (Eq. 2)
-    fn cubic_k(&self, cwnd: usize, max_datagram_size: usize) -> f64 {
+    fn cubic_k(&self, cwnd: usize, max_datagram_size: usize, c: f64) -> f64 {
         let w_max = self.w_max / max_datagram_size as f64;
         let cwnd = cwnd as f64 / max_datagram_size as f64;
 
-        libm::cbrt((w_max - cwnd) / C)
+        libm::cbrt((w_max - cwnd) / c)
     }
 
     // W_cubic(t) = C * (t - K)^3 + w_max (Eq. 1)
-    fn w_cubic(&self, t: Duration, max_datagram_size: usize) -> f64 {
+    fn w_cubic(&self, t: Duration, max_datagram_size: usize, c: f64) -> f64 {
         let w_max = self.w_max / max_datagram_size as f64;
 
-        (C * (t.as_secs_f64() - self.k).powi(3) + w_max) *
+        (c * (t.as_secs_f64() - self.k).powi(3) + w_max) *
             max_datagram_size as f64
     }
 
@@ -157,6 +159,7 @@ fn collapse_cwnd(r: &mut Recovery) {
     let cubic = &mut r.cubic_state;
 
     r.congestion_recovery_start_time = None;
+    r.congestion_recovery_metadata = None;
 
     cubic.w_max = r.congestion_window as f64;
 
@@ -187,6 +190,7 @@ fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, now: Instant) {
                 if delta.as_nanos() > 0 {
                     r.congestion_recovery_start_time =
                         Some(recovery_start_time + delta);
+                    r.congestion_recovery_metadata = None;
                 }
             }
         }
@@ -209,6 +213,11 @@ fn on_packet_acked(
     r: &mut Recovery, packet: &Acked, epoch: packet::Epoch, now: Instant,
 ) {
     let in_congestion_recovery = r.in_congestion_recovery(packet.time_sent);
+    let cubic_c = if let Some(md) = &r.congestion_recovery_metadata {
+        (C.cbrt() / md.near_subpath_ratio).powi(3)
+    } else {
+        C
+    };
 
     r.bytes_in_flight = r.bytes_in_flight.saturating_sub(packet.size);
 
@@ -299,6 +308,7 @@ fn on_packet_acked(
                     // initialize congestion_recovery_start_time, w_max and k.
                     ca_start_time = now;
                     r.congestion_recovery_start_time = Some(now);
+                    r.congestion_recovery_metadata = None;
 
                     r.cubic_state.w_max = r.congestion_window as f64;
                     r.cubic_state.k = 0.0;
@@ -312,7 +322,7 @@ fn on_packet_acked(
         let t = now.saturating_duration_since(ca_start_time);
 
         // target = w_cubic(t + rtt)
-        let target = r.cubic_state.w_cubic(t + r.min_rtt, r.max_datagram_size);
+        let target = r.cubic_state.w_cubic(t + r.min_rtt, r.max_datagram_size, cubic_c);
 
         // Clipping target to [cwnd, 1.5 x cwnd]
         let target = f64::max(target, r.congestion_window as f64);
@@ -332,7 +342,7 @@ fn on_packet_acked(
 
         let mut cubic_cwnd = r.congestion_window;
 
-        if r.cubic_state.w_cubic(t, r.max_datagram_size) < r.cubic_state.w_est {
+        if r.cubic_state.w_cubic(t, r.max_datagram_size, cubic_c) < r.cubic_state.w_est {
             // AIMD friendly region (W_cubic(t) < W_est)
             cubic_cwnd = cmp::max(cubic_cwnd, r.cubic_state.w_est as usize);
         } else {
@@ -359,26 +369,30 @@ fn congestion_event(
     r: &mut Recovery, _lost_bytes: usize, time_sent: Instant,
     epoch: packet::Epoch, now: Instant, metadata: Option<QuackMetadata>,
 ) {
-    if metadata.is_some() {
-        return;
-    }
-
     let in_congestion_recovery = r.in_congestion_recovery(time_sent);
 
     // Start a new congestion event if packet was sent after the
     // start of the previous congestion recovery period.
     if !in_congestion_recovery {
         r.congestion_recovery_start_time = Some(now);
+        let (beta_cubic, cubic_c) = if let Some(md) = &metadata {
+            let beta_cubic = 1.0 - md.near_subpath_ratio * (1.0 - BETA_CUBIC);
+            let cubic_c = (C.cbrt() / md.near_subpath_ratio).powi(3);
+            (beta_cubic, cubic_c)
+        } else {
+            (BETA_CUBIC, C)
+        };
+        r.congestion_recovery_metadata = metadata;
 
         // Fast convergence
         if (r.congestion_window as f64) < r.cubic_state.w_max {
             r.cubic_state.w_max =
-                r.congestion_window as f64 * (1.0 + BETA_CUBIC) / 2.0;
+                r.congestion_window as f64 * (1.0 + beta_cubic) / 2.0;
         } else {
             r.cubic_state.w_max = r.congestion_window as f64;
         }
 
-        r.ssthresh = (r.congestion_window as f64 * BETA_CUBIC) as usize;
+        r.ssthresh = (r.congestion_window as f64 * beta_cubic) as usize;
         r.ssthresh = cmp::max(
             r.ssthresh,
             r.max_datagram_size * recovery::MINIMUM_WINDOW_PACKETS,
@@ -391,11 +405,11 @@ fn congestion_event(
             0.0
         } else {
             r.cubic_state
-                .cubic_k(r.congestion_window, r.max_datagram_size)
+                .cubic_k(r.congestion_window, r.max_datagram_size, cubic_c)
         };
 
         r.cubic_state.cwnd_inc =
-            (r.cubic_state.cwnd_inc as f64 * BETA_CUBIC) as usize;
+            (r.cubic_state.cwnd_inc as f64 * beta_cubic) as usize;
 
         r.cubic_state.w_est = r.congestion_window as f64;
         r.cubic_state.alpha_aimd = ALPHA_AIMD;
@@ -414,6 +428,7 @@ fn checkpoint(r: &mut Recovery) {
     r.cubic_state.prior.w_max = r.cubic_state.w_max;
     r.cubic_state.prior.k = r.cubic_state.k;
     r.cubic_state.prior.epoch_start = r.congestion_recovery_start_time;
+    r.cubic_state.prior.quack_metadata = r.congestion_recovery_metadata.clone();
     r.cubic_state.prior.lost_count = r.lost_count;
 }
 
@@ -434,6 +449,7 @@ fn rollback(r: &mut Recovery) -> bool {
     r.cubic_state.w_max = r.cubic_state.prior.w_max;
     r.cubic_state.k = r.cubic_state.prior.k;
     r.congestion_recovery_start_time = r.cubic_state.prior.epoch_start;
+    r.congestion_recovery_metadata = r.cubic_state.prior.quack_metadata.clone();
 
     true
 }

@@ -60,7 +60,7 @@ const SIDECAR_RESET_THRESHOLD: Duration = Duration::from_millis(10);
 // const SIDECAR_LINK2_LOSS_DELAY: Duration = Duration::from_millis(3);
 
 // // Loss Recovery
-// const SIDECAR_IGNORE_THRESHOLD: usize = 10000;
+const DEFAULT_NEAR_SUBPATH_RATIO: f64 = 2.0 / 152.0;
 
 const INITIAL_PACKET_THRESHOLD: u64 = 3;
 
@@ -157,6 +157,8 @@ pub struct Recovery {
     pub bytes_lost: u64,
 
     congestion_recovery_start_time: Option<Instant>,
+
+    congestion_recovery_metadata: Option<QuackMetadata>,
 
     max_datagram_size: usize,
 
@@ -294,6 +296,8 @@ impl Recovery {
 
             congestion_recovery_start_time: None,
 
+            congestion_recovery_metadata: None,
+
             max_datagram_size: recovery_config.max_send_udp_payload_size,
 
             cc_ops: recovery_config.cc_ops,
@@ -363,6 +367,7 @@ impl Recovery {
         println!("cwnd {} {:?} (reset)", self.congestion_window, std::time::Instant::now());
         self.in_flight_count = [0; packet::Epoch::count()];
         self.congestion_recovery_start_time = None;
+        self.congestion_recovery_metadata = None;
         self.ssthresh = std::usize::MAX;
         (self.cc_ops.reset)(self);
         self.hystart.reset();
@@ -743,7 +748,7 @@ impl Recovery {
         self.bytes_lost += lost_bytes as u64;
         // TODO: call on_packets_lost() to adjust cwnd?
         if let Some(pkt) = largest_lost_pkt {
-            let metadata = QuackMetadata {};
+            let metadata = QuackMetadata { near_subpath_ratio: DEFAULT_NEAR_SUBPATH_RATIO };
             self.on_packets_lost(lost_bytes, &pkt, epoch, now, Some(metadata));
             #[cfg(feature = "cwnd_log")]
             println!("cwnd {} {:?} (on_quack_received)", self.cwnd(), std::time::Instant::now());
@@ -1431,6 +1436,7 @@ impl FromStr for CongestionControlAlgorithm {
 
 #[derive(Debug, Clone)]
 pub struct QuackMetadata {
+    near_subpath_ratio: f64,
 }
 
 pub struct CongestionControlOps {
@@ -1511,6 +1517,11 @@ impl std::fmt::Debug for Recovery {
             f,
             "congestion_recovery_start_time={:?} ",
             self.congestion_recovery_start_time
+        )?;
+        write!(
+            f,
+            "congestion_recovery_metadata={:?} ",
+            self.congestion_recovery_metadata
         )?;
         write!(f, "{:?} ", self.delivery_rate)?;
         write!(f, "pacer={:?} ", self.pacer)?;
