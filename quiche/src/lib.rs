@@ -1985,7 +1985,7 @@ impl Connection {
     /// Process quACKs received from a sidecar.
     pub fn recv_quack(
         &mut self,
-        quack: PowerSumQuack,
+        quack: PowerSumQuack<u32>,
         from: SocketAddr,
     ) -> Result<()> {
         if self.paths.len() != 1 {

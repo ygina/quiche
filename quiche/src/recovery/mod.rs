@@ -50,7 +50,7 @@ use qlog::events::EventData;
 
 use quack::{
     Quack, PowerSumQuack,
-    arithmetic::MonicPolynomialEvaluator,
+    arithmetic::{MonicPolynomialEvaluator, ModularArithmetic},
 };
 use smallvec::SmallVec;
 
@@ -188,7 +188,7 @@ pub struct Recovery {
 
     sidecar: bool,
     quack_reset: bool,
-    quack: PowerSumQuack,
+    quack: PowerSumQuack<u32>,
     last_decoded_quack_count: u16,
     last_quack_reset: Instant,
 
@@ -524,7 +524,7 @@ impl Recovery {
     }
 
     pub fn on_quack_received(
-        &mut self, quack: PowerSumQuack, from: SocketAddr,
+        &mut self, quack: PowerSumQuack<u32>, from: SocketAddr,
     ) -> Result<(usize, usize)> {
         // Don't process the quack if it hasn't changed since the last one we
         // received.
