@@ -1047,6 +1047,13 @@ impl Config {
         self.local_transport_params.max_ack_delay = v;
     }
 
+    /// Sets the `min_ack_delay` transport parameter.
+    ///
+    /// The default value is `0`.
+    pub fn set_min_ack_delay(&mut self, v: u64) {
+        self.local_transport_params.min_ack_delay = v;
+    }
+
     /// Sets the `active_connection_id_limit` transport parameter.
     ///
     /// The default value is `2`. Lower values will be ignored.
@@ -3395,24 +3402,33 @@ impl Connection {
                     self.local_error().map_or(false, |le| le.is_app))) &&
             self.paths.get(send_pid)?.active()
         {
-            let ack_delay =
-                self.pkt_num_spaces[epoch].largest_rx_pkt_time.elapsed();
+            let now = time::Instant::now();
+            let ack_delay = now - cmp::min(
+                self.pkt_num_spaces[epoch].largest_rx_pkt_time,
+                self.pkt_num_spaces[epoch].last_ack_time,
+            );
 
-            let ack_delay = ack_delay.as_micros() as u64 /
-                2_u64
-                    .pow(self.local_transport_params.ack_delay_exponent as u32);
+            // Only send the ACK if the min_ack_delay has elapsed
+            if ack_delay.as_millis() as u64 >= self.local_transport_params.min_ack_delay {
+                self.pkt_num_spaces[epoch].last_ack_time = now;
+                let ranges = self.pkt_num_spaces[epoch].recv_pkt_need_ack.clone();
+                println!("ack {:?} delay={:?}", ranges, ack_delay);
 
-            let frame = frame::Frame::ACK {
-                ack_delay,
-                ranges: self.pkt_num_spaces[epoch].recv_pkt_need_ack.clone(),
-                ecn_counts: None, // sending ECN is not supported at this time
-            };
+                let ack_delay = ack_delay.as_micros() as u64 /
+                    2_u64
+                        .pow(self.local_transport_params.ack_delay_exponent as u32);
+                let frame = frame::Frame::ACK {
+                    ack_delay,
+                    ranges,
+                    ecn_counts: None, // sending ECN is not supported at this time
+                };
 
-            // ACK-only packets are not congestion controlled so ACKs must be
-            // bundled considering the buffer capacity only, and not
-            // the available cwnd.
-            if push_frame_to_pkt!(b, frames, frame, left) {
-                self.pkt_num_spaces[epoch].ack_elicited = false;
+                // ACK-only packets are not congestion controlled so ACKs must be
+                // bundled considering the buffer capacity only, and not
+                // the available cwnd.
+                if push_frame_to_pkt!(b, frames, frame, left) {
+                    self.pkt_num_spaces[epoch].ack_elicited = false;
+                }
             }
         }
 
@@ -7339,6 +7355,7 @@ struct TransportParams {
     pub initial_max_streams_uni: u64,
     pub ack_delay_exponent: u64,
     pub max_ack_delay: u64,
+    pub min_ack_delay: u64,
     pub disable_active_migration: bool,
     // pub preferred_address: ...,
     pub active_conn_id_limit: u64,
@@ -7362,6 +7379,7 @@ impl Default for TransportParams {
             initial_max_streams_uni: 0,
             ack_delay_exponent: 3,
             max_ack_delay: 25,
+            min_ack_delay: 0,
             disable_active_migration: false,
             active_conn_id_limit: 2,
             initial_source_connection_id: None,
