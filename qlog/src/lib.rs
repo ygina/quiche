@@ -623,10 +623,9 @@ pub struct Token {
     #[serde(rename(serialize = "type"))]
     pub ty: Option<TokenType>,
 
-    pub length: Option<u32>,
-    pub data: Option<Bytes>,
-
     pub details: Option<String>,
+
+    pub raw: Option<events::RawInfo>,
 }
 
 pub struct HexSlice<'a>(&'a [u8]);
@@ -809,16 +808,14 @@ mod tests {
 
         let pkt_hdr = make_pkt_hdr(PacketType::Initial);
 
-        let mut frames = Vec::new();
-        frames.push(QuicFrame::Padding);
-        frames.push(QuicFrame::Ping);
-        frames.push(QuicFrame::Stream {
-            stream_id: 0,
-            offset: 0,
-            length: 100,
-            fin: Some(true),
-            raw: None,
-        });
+        let frames =
+            vec![QuicFrame::Padding, QuicFrame::Ping, QuicFrame::Stream {
+                stream_id: 0,
+                offset: 0,
+                length: 100,
+                fin: Some(true),
+                raw: None,
+            }];
 
         let ev_data = EventData::PacketSent(PacketSent {
             header: pkt_hdr,
