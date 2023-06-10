@@ -3601,7 +3601,6 @@ impl Connection {
             if epoch != packet::Epoch::Application || ack_delay.as_millis() as u64 >= self.local_transport_params.min_ack_delay {
                 pkt_space.last_ack_time = now;
                 let ranges = pkt_space.recv_pkt_need_ack.clone();
-                println!("ack {:?} delay={:?}", ranges, ack_delay);
 
                 let ack_delay = ack_delay.as_micros() as u64 /
                     2_u64
