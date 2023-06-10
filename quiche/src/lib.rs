@@ -3590,14 +3590,15 @@ impl Connection {
                         .map_or(false, |le| le.is_app))) &&
             path.active()
         {
-            let now = time::Instant::now();
             let ack_delay = now - cmp::min(
                 pkt_space.largest_rx_pkt_time,
                 pkt_space.last_ack_time,
             );
 
-            // Only send the ACK if the min_ack_delay has elapsed
-            if ack_delay.as_millis() as u64 >= self.local_transport_params.min_ack_delay {
+            // Only send the ACK if the min_ack_delay has elapsed or if we
+            // are not in the Application epoch to allow the cryptographic
+            // handshake to complete
+            if epoch != packet::Epoch::Application || ack_delay.as_millis() as u64 >= self.local_transport_params.min_ack_delay {
                 pkt_space.last_ack_time = now;
                 let ranges = pkt_space.recv_pkt_need_ack.clone();
                 println!("ack {:?} delay={:?}", ranges, ack_delay);
