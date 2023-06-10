@@ -1367,6 +1367,9 @@ pub struct Connection {
     /// Idle timeout expiration time.
     idle_timer: Option<time::Instant>,
 
+    /// Ack timeout expiration time for max ack delay.
+    ack_timer: Option<time::Instant>,
+
     /// Draining timeout expiration time.
     draining_timer: Option<time::Instant>,
 
@@ -1753,6 +1756,12 @@ impl Connection {
             reset_token,
         );
 
+        let ack_timer = if config.local_transport_params.max_ack_delay == 0 {
+            None
+        } else {
+            Some(time::Instant::now() + time::Duration::from_millis(config.local_transport_params.max_ack_delay))
+        };
+
         let mut conn = Connection {
             version: config.version,
 
@@ -1825,6 +1834,8 @@ impl Connection {
             blocked_limit: None,
 
             idle_timer: None,
+
+            ack_timer,
 
             draining_timer: None,
 
@@ -3558,6 +3569,12 @@ impl Connection {
 
         let left_before_packing_ack_frame = left;
 
+        let ack_timer_expired = if let Some(ack_timer) = self.ack_timer {
+            now > ack_timer
+        } else {
+            false
+        };
+
         // Create ACK frame.
         //
         // When we need to explicitly elicit an ACK via PING later, go ahead and
@@ -3565,7 +3582,7 @@ impl Connection {
         // send a packet with PING anyways, even if we haven't received anything
         // ACK eliciting.
         if pkt_space.recv_pkt_need_ack.len() > 0 &&
-            (pkt_space.ack_elicited || ack_elicit_required) &&
+            (pkt_space.ack_elicited || ack_elicit_required || ack_timer_expired) &&
             (!is_closing ||
                 (pkt_type == Type::Handshake &&
                     self.local_error
@@ -3605,6 +3622,10 @@ impl Connection {
                     if push_frame_to_pkt!(b, frames, frame, left) {
                         pkt_space.ack_elicited = false;
                     }
+                }
+
+                if self.local_transport_params.max_ack_delay != 0 {
+                    self.ack_timer = Some(now + time::Duration::from_millis(self.local_transport_params.max_ack_delay));
                 }
             }
         }
@@ -5520,7 +5541,7 @@ impl Connection {
                 .as_ref()
                 .map(|key_update| key_update.timer);
 
-            let timers = [self.idle_timer, path_timer, key_update_timer];
+            let timers = [self.idle_timer, self.ack_timer, path_timer, key_update_timer];
 
             timers.iter().filter_map(|&x| x).min()
         }
