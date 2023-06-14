@@ -3622,10 +3622,10 @@ impl Connection {
                     if push_frame_to_pkt!(b, frames, frame, left) {
                         pkt_space.ack_elicited = false;
                     }
-                }
 
-                if self.local_transport_params.max_ack_delay != 0 {
-                    self.ack_timer = Some(now + time::Duration::from_millis(self.local_transport_params.max_ack_delay));
+                    if self.local_transport_params.max_ack_delay != 0 {
+                        self.ack_timer = Some(now + time::Duration::from_millis(self.local_transport_params.max_ack_delay));
+                    }
                 }
             }
         }
