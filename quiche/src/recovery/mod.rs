@@ -90,6 +90,9 @@ const PACING_MULTIPLIER: f64 = 1.25;
 pub(super) const MAX_OUTSTANDING_NON_ACK_ELICITING: usize = 24;
 
 // Sidecar features
+const SIDECAR_MARK_ACKED: bool = false;
+const SIDECAR_MARK_LOST_AND_RETX: bool = true;
+const SIDECAR_UPDATE_CWND: bool = true;
 const SIDECAR_RESET_THRESHOLD: Duration = Duration::from_millis(10);
 
 #[derive(Default)]
@@ -549,7 +552,6 @@ impl Recovery {
             return Ok(());
         }
 
-        // This is a congestion event.
         let now = Instant::now();
 
         // This time threshold should be long enough that if the host and proxy
@@ -711,9 +713,34 @@ impl Recovery {
         }
 
         let now = Instant::now();
-        let update_cwnd = true;
-        let (lost_bytes, lost_packets) =
-            self.sidecar_detect_lost_packets(&decoded, update_cwnd);
+        let epoch = packet::Epoch::Application;
+
+        // Detect and mark acked packets, without removing them from the sent
+        // packets list.
+        let mut newly_acked = if SIDECAR_MARK_ACKED {
+            self.sidecar_mark_acked_packets(&decoded, now, epoch)
+        } else {
+            Vec::new()
+        };
+        if SIDECAR_MARK_ACKED && newly_acked.is_empty() {
+            return Ok((0, 0));
+        }
+
+        // Detect and mark lost packets, without removing them from the sent
+        // packets list.
+        let (lost_bytes, lost_packets, largest_lost_pkt) = if SIDECAR_MARK_LOST_AND_RETX {
+            self.sidecar_mark_lost_packets(&decoded, now, epoch)
+        } else {
+            (0, 0, None)
+        };
+
+        // Update the congestion window. Notably, we do not drain packets.
+        if SIDECAR_UPDATE_CWND {
+            self.sidecar_on_packets_lost(
+                now, epoch, lost_bytes, largest_lost_pkt);
+            self.sidecar_on_packets_acked(
+                now, epoch, &mut newly_acked);
+        }
 
         // Clean up the log, assuming we handle missing indexes (outside the
         // suffix) the first time we detect them and never again. Packets in
@@ -730,15 +757,69 @@ impl Recovery {
         Ok((lost_packets, lost_bytes))
     }
 
-    fn sidecar_detect_lost_packets(
-        &mut self, decoded: &DecodedQuack, update_cwnd: bool,
-    ) -> (usize, usize) {
-        if decoded.missing_ids.is_empty() {
-            return (0, 0);
+    /// Returns whether any packets were newly acked.
+    fn sidecar_mark_acked_packets(
+        &mut self, decoded: &DecodedQuack, now: Instant, epoch: packet::Epoch,
+    ) -> Vec<Acked> {
+        // Get the identifiers of everything from 0 to log.len()-suffix and not
+        // in missing indexes. These are the acked packets in the log.
+        let mut acked_ids = HashSet::new();
+        for i in 0..(self.log.len() - decoded.missing_suffix) {
+            if !decoded.missing_ids.contains(&self.log[i]) {
+                acked_ids.insert(self.log[i]);
+            }
+        }
+        if acked_ids.is_empty() {
+            return Vec::new();
         }
 
-        let now = Instant::now();
-        let epoch = packet::Epoch::Application;
+        // Map these identifiers to packet numbers in self.sent and mark them
+        // as acked.
+        let mut newly_acked = Vec::new();
+
+        let unacked_iter = self.sent[epoch]
+            .iter_mut()
+            .filter(|p| p.time_acked.is_none());
+
+        for unacked in unacked_iter {
+            if acked_ids.is_empty() {
+                break;
+            }
+            if !acked_ids.remove(&unacked.sidecar_id) {
+                continue;
+            }
+
+            unacked.time_acked = Some(now);
+
+            self.acked[epoch].extend(unacked.frames.drain(..));
+
+            if unacked.in_flight {
+                self.in_flight_count[epoch] =
+                    self.in_flight_count[epoch].saturating_sub(1);
+            }
+
+            newly_acked.push(Acked {
+                pkt_num: unacked.pkt_num,
+                time_sent: unacked.time_sent,
+                size: unacked.size,
+                rtt: now.saturating_duration_since(unacked.time_sent),
+                delivered: unacked.delivered,
+                delivered_time: unacked.delivered_time,
+                first_sent_time: unacked.first_sent_time,
+                is_app_limited: unacked.is_app_limited,
+            });
+        }
+
+        newly_acked
+    }
+
+    fn sidecar_mark_lost_packets(
+        &mut self, decoded: &DecodedQuack, now: Instant, epoch: packet::Epoch,
+    ) -> (usize, usize, Option<Sent>) {
+        if decoded.missing_ids.is_empty() {
+            return (0, 0, None);
+        }
+
         let unacked_iter = self.sent[epoch]
             .iter_mut()
             // .take_while(|p| p.pkt_num <= largest_acked)
@@ -749,6 +830,9 @@ impl Recovery {
         let mut largest_lost_pkt = None;
         let mut missing_ids = decoded.missing_ids.clone();
         for unacked in unacked_iter {
+            if missing_ids.is_empty() {
+                break;
+            }
             if !missing_ids.remove(&unacked.sidecar_id) {
                 continue;
             }
@@ -784,25 +868,34 @@ impl Recovery {
         self.lost_count += lost_packets;
         self.bytes_in_flight = self.bytes_in_flight.saturating_sub(lost_bytes);
 
-        // Update the congestion window.
-        if update_cwnd {
-            if let Some(pkt) = largest_lost_pkt {
-                let epoch = packet::Epoch::Application;
-                let metadata = QuackMetadata {
-                    near_subpath_ratio: DEFAULT_NEAR_SUBPATH_RATIO,
-                };
+        (lost_bytes, lost_packets, largest_lost_pkt)
+    }
 
-                self.congestion_event(
-                    lost_bytes, pkt.time_sent, epoch, now, Some(metadata));
-                // if self.in_persistent_congestion(pkt.pkt_num) {
-                //     self.collapse_cwnd();
-                // }
-                #[cfg(feature = "cwnd_log")]
-                println!("cwnd {} {:?} (on_quack_received)", self.cwnd(), now);
-            }
+    fn sidecar_on_packets_lost(
+        &mut self, now: Instant, epoch: packet::Epoch,
+        lost_bytes: usize, largest_lost_pkt: Option<Sent>,
+    ) {
+        if let Some(pkt) = largest_lost_pkt {
+            let metadata = QuackMetadata {
+                near_subpath_ratio: DEFAULT_NEAR_SUBPATH_RATIO,
+            };
+
+            self.congestion_event(
+                lost_bytes, pkt.time_sent, epoch, now, Some(metadata));
+            // if self.in_persistent_congestion(pkt.pkt_num) {
+            //     self.collapse_cwnd();
+            // }
+            #[cfg(feature = "cwnd_log")]
+            println!("cwnd {} {:?} (on_quack_received)", self.cwnd(), now);
         }
+    }
 
-        (lost_bytes, lost_packets)
+    fn sidecar_on_packets_acked(
+        &mut self, now: Instant, epoch: packet::Epoch, acked: &mut Vec<Acked>
+    ) {
+        if !acked.is_empty() {
+            self.on_packets_acked(acked, epoch, now);
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
