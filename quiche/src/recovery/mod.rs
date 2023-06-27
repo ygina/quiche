@@ -421,7 +421,7 @@ impl Recovery {
     pub fn reset(&mut self) {
         self.congestion_window = self.max_datagram_size * INITIAL_WINDOW_PACKETS;
         #[cfg(feature = "cwnd_log")]
-        println!("cwnd {} {:?} (reset)", self.congestion_window, std::time::Instant::now());
+        println!("cwnd {} {:?} (reset)", self.cwnd(), Instant::now());
         self.in_flight_count = [0; packet::Epoch::count()];
         self.congestion_recovery_start_time = None;
         self.congestion_recovery_metadata = None;
@@ -736,6 +736,10 @@ impl Recovery {
 
         // Update the congestion window. Notably, we do not drain packets.
         if SIDECAR_UPDATE_CWND {
+            #[cfg(feature = "debug")]
+            if lost_packets > 0 || !newly_acked.is_empty() {
+                println!("DEBUG: newly acked {} packets and lost {} packets", newly_acked.len(), lost_packets);
+            }
             self.sidecar_on_packets_lost(
                 now, epoch, lost_bytes, largest_lost_pkt);
             self.sidecar_on_packets_acked(
@@ -880,13 +884,17 @@ impl Recovery {
                 near_subpath_ratio: DEFAULT_NEAR_SUBPATH_RATIO,
             };
 
+            #[cfg(feature = "cwnd_log")]
+            let old_cwnd = self.cwnd();
             self.congestion_event(
                 lost_bytes, pkt.time_sent, epoch, now, Some(metadata));
+            #[cfg(feature = "cwnd_log")]
+            if self.cwnd() != old_cwnd {
+                println!("cwnd {} {:?} (sidecar_on_packets_lost)", self.cwnd(), now);
+            }
             // if self.in_persistent_congestion(pkt.pkt_num) {
             //     self.collapse_cwnd();
             // }
-            #[cfg(feature = "cwnd_log")]
-            println!("cwnd {} {:?} (on_quack_received)", self.cwnd(), now);
         }
     }
 
@@ -894,7 +902,13 @@ impl Recovery {
         &mut self, now: Instant, epoch: packet::Epoch, acked: &mut Vec<Acked>
     ) {
         if !acked.is_empty() {
+            #[cfg(feature = "cwnd_log")]
+            let old_cwnd = self.cwnd();
             self.on_packets_acked(acked, epoch, now);
+            #[cfg(feature = "cwnd_log")]
+            if self.cwnd() != old_cwnd {
+                println!("cwnd {} {:?} (sidecar_on_packets_acked)", self.cwnd(), now);
+            }
         }
     }
 
@@ -1065,7 +1079,13 @@ impl Recovery {
         let (lost_packets, lost_bytes) =
             self.detect_lost_packets(epoch, now, trace_id);
 
+        #[cfg(feature = "cwnd_log")]
+        let old_cwnd = self.cwnd();
         self.on_packets_acked(newly_acked, epoch, now);
+        #[cfg(feature = "cwnd_log")]
+        if self.cwnd() != old_cwnd {
+            println!("cwnd {} {:?} (on_packets_acked)", self.cwnd(), now);
+        }
 
         self.pto_count = 0;
 
@@ -1521,7 +1541,13 @@ impl Recovery {
     ) {
         self.bytes_in_flight = self.bytes_in_flight.saturating_sub(lost_bytes);
 
+        #[cfg(feature = "cwnd_log")]
+        let old_cwnd = self.cwnd();
         self.congestion_event(lost_bytes, largest_lost_pkt.time_sent, epoch, now, metadata);
+        #[cfg(feature = "cwnd_log")]
+        if self.cwnd() != old_cwnd {
+            println!("cwnd {} {:?} (sidecar_on_packets_lost)", self.cwnd(), now);
+        }
 
         if self.in_persistent_congestion(largest_lost_pkt.pkt_num) {
             self.collapse_cwnd();

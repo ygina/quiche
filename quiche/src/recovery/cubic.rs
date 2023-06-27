@@ -270,12 +270,8 @@ fn on_packet_acked(
             if r.hystart.in_css(epoch) {
                 r.congestion_window +=
                     r.hystart.css_cwnd_inc(r.max_datagram_size);
-                #[cfg(feature = "cwnd_log")]
-                println!("cwnd {} {:?} (cubic::on_packet_acked 1)", r.cwnd(), std::time::Instant::now());
             } else {
                 r.congestion_window += r.max_datagram_size;
-                #[cfg(feature = "cwnd_log")]
-                println!("cwnd {} {:?} (cubic::on_packet_acked 2)", r.cwnd(), std::time::Instant::now());
             }
 
             r.bytes_acked_sl -= r.max_datagram_size;
@@ -359,8 +355,6 @@ fn on_packet_acked(
 
         if r.cubic_state.cwnd_inc >= r.max_datagram_size {
             r.congestion_window += r.max_datagram_size;
-            #[cfg(feature = "cwnd_log")]
-            println!("cwnd {} {:?} (cubic::on_packet_acked 3)", r.cwnd(), std::time::Instant::now());
             r.cubic_state.cwnd_inc -= r.max_datagram_size;
         }
     }
@@ -399,8 +393,6 @@ fn congestion_event(
             r.max_datagram_size * recovery::MINIMUM_WINDOW_PACKETS,
         );
         r.congestion_window = r.ssthresh;
-        #[cfg(feature = "cwnd_log")]
-        println!("cwnd {} {:?} (cubic::congestion_event)", r.cwnd(), std::time::Instant::now());
 
         r.cubic_state.k = if r.cubic_state.w_max < r.congestion_window as f64 {
             0.0
