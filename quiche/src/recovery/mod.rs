@@ -779,7 +779,7 @@ impl Recovery {
 
         let unacked_iter = self.sent[epoch]
             .iter_mut()
-            .filter(|p| p.time_acked.is_none());
+            .filter(|p| p.time_acked_sidecar.is_none() && p.time_acked.is_none());
 
         for unacked in unacked_iter {
             if acked_ids.is_empty() {
@@ -789,7 +789,7 @@ impl Recovery {
                 continue;
             }
 
-            unacked.time_acked = Some(now);
+            unacked.time_acked_sidecar = Some(now);
 
             self.acked[epoch].extend(unacked.frames.drain(..));
 
@@ -823,7 +823,7 @@ impl Recovery {
         let unacked_iter = self.sent[epoch]
             .iter_mut()
             // .take_while(|p| p.pkt_num <= largest_acked)
-            .filter(|p| p.time_acked.is_none());
+            .filter(|p| p.time_acked.is_none() && p.time_acked_sidecar.is_none());
 
         let mut lost_bytes = 0;
         let mut lost_packets = 0;
@@ -931,6 +931,8 @@ impl Recovery {
 
         let sent = &mut self.sent[epoch];
 
+        let mut acked = false;
+
         // Detect and mark acked packets, without removing them from the sent
         // packets list.
         for r in ranges.iter() {
@@ -959,6 +961,7 @@ impl Recovery {
                 .filter(|p| p.time_acked.is_none());
 
             for unacked in unacked_iter {
+                acked = true;
                 unacked.time_acked = Some(now);
 
                 // Check if acked packet was already declared lost.
@@ -997,6 +1000,10 @@ impl Recovery {
                 largest_newly_acked_pkt_num = unacked.pkt_num;
                 largest_newly_acked_sent_time = unacked.time_sent;
 
+                if unacked.time_acked_sidecar.is_some() {
+                    continue;
+                }
+
                 self.acked[epoch].extend(unacked.frames.drain(..));
 
                 if unacked.in_flight {
@@ -1031,7 +1038,7 @@ impl Recovery {
             (self.cc_ops.rollback)(self);
         }
 
-        if newly_acked.is_empty() {
+        if !acked {
             return Ok((0, 0));
         }
 
@@ -1713,6 +1720,8 @@ pub struct Sent {
     pub frames: SmallVec<[frame::Frame; 1]>,
 
     pub time_sent: Instant,
+
+    pub time_acked_sidecar: Option<Instant>,
 
     pub time_acked: Option<Instant>,
 

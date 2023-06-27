@@ -4361,6 +4361,7 @@ impl Connection {
             pkt_num: pn,
             frames,
             time_sent: now,
+            time_acked_sidecar: None,
             time_acked: None,
             time_lost: None,
             size: if ack_eliciting { written } else { 0 },
