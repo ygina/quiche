@@ -110,7 +110,7 @@ impl DecodedQuack {
     /// a cumulative ACK up to that point. We could additionally implement
     /// TCP's reordering threshold by not considering an index missing if there
     /// is a small number of received packets after that one before the suffix.
-    pub fn decode(&mut self, quack: PowerSumQuack<u32>, log: &Vec<u32>) {
+    pub fn decode(&mut self, quack: PowerSumQuack<u32>, log: &Vec<u32>, now: Instant) {
         let coeffs = quack.to_coeffs();
         let mut in_suffix = true;
         for (index, &id) in log.iter().enumerate().rev() {
@@ -124,7 +124,7 @@ impl DecodedQuack {
                 continue;
             }
             #[cfg(feature = "quack_log")]
-            println!("lost {:?} {} (on_quack_received)", Instant::now(), id);
+            println!("quack_log {:?} {} (sidecar_detect_lost_packets)", now, id);
             self.missing_indexes.push(index);
             if self.missing_ids.insert(id) {
                 // It is not very likely that two packets have the same
@@ -502,10 +502,10 @@ impl Recovery {
 
         if self.sidecar {
             self.quack.insert(pkt.sidecar_id);
-            #[cfg(feature = "quack_log")]
-            println!("quack {:?} {} {}", std::time::Instant::now(), pkt.sidecar_id, self.quack.count());
             self.log.push(pkt.sidecar_id);
         }
+        #[cfg(feature = "quack_log")]
+        println!("quack_log {:?} {} (sent) {}", now, pkt.sidecar_id, self.quack.count());
 
         self.sent[epoch].push_back(pkt);
 
@@ -696,8 +696,10 @@ impl Recovery {
         // };
 
         // Find the missing packets that are not in the suffix.
+        let now = Instant::now();
+        let epoch = packet::Epoch::Application;
         let mut decoded = DecodedQuack::default();
-        decoded.decode(self.quack.clone() - quack, &self.log);
+        decoded.decode(self.quack.clone() - quack, &self.log, now);
 
         #[cfg(feature = "debug")]
         if self.quack_epoch > 0 {
@@ -711,9 +713,6 @@ impl Recovery {
                 decoded.missing_ids,
             );
         }
-
-        let now = Instant::now();
-        let epoch = packet::Epoch::Application;
 
         // Detect and mark acked packets, without removing them from the sent
         // packets list.
@@ -736,10 +735,6 @@ impl Recovery {
 
         // Update the congestion window. Notably, we do not drain packets.
         if SIDECAR_UPDATE_CWND {
-            #[cfg(feature = "debug")]
-            if lost_packets > 0 || !newly_acked.is_empty() {
-                println!("DEBUG: newly acked {} packets and lost {} packets", newly_acked.len(), lost_packets);
-            }
             self.sidecar_on_packets_lost(
                 now, epoch, lost_bytes, largest_lost_pkt);
             self.sidecar_on_packets_acked(
@@ -794,6 +789,9 @@ impl Recovery {
             }
 
             unacked.time_acked_sidecar = Some(now);
+
+            #[cfg(feature = "quack_log")]
+            println!("quack_log {:?} {} (quacked)", now, unacked.sidecar_id);
 
             self.acked[epoch].extend(unacked.frames.drain(..));
 
@@ -871,6 +869,8 @@ impl Recovery {
         self.bytes_lost += lost_bytes as u64;
         self.lost_count += lost_packets;
         self.bytes_in_flight = self.bytes_in_flight.saturating_sub(lost_bytes);
+        #[cfg(feature = "bytes_in_flight_log")]
+        println!("bytes_in_flight {} {:?} (sidecar_mark_acked_packets)", self.bytes_in_flight, now);
 
         (lost_bytes, lost_packets, largest_lost_pkt)
     }
@@ -977,6 +977,8 @@ impl Recovery {
             for unacked in unacked_iter {
                 acked = true;
                 unacked.time_acked = Some(now);
+                #[cfg(feature = "quack_log")]
+                println!("quack_log {:?} {} (acked)", now, unacked.sidecar_id);
 
                 // Check if acked packet was already declared lost.
                 if unacked.time_lost.is_some() {
@@ -1174,6 +1176,8 @@ impl Recovery {
             .fold(0, |acc, p| acc + p.size);
 
         self.bytes_in_flight = self.bytes_in_flight.saturating_sub(unacked_bytes);
+        #[cfg(feature = "bytes_in_flight_log")]
+        println!("bytes_in_flight {} {:?} (on_pkt_num_space_discarded)", self.bytes_in_flight, now);
 
         self.sent[epoch].clear();
         self.lost[epoch].clear();
@@ -1446,8 +1450,7 @@ impl Recovery {
 
                 lost_packets += 1;
                 #[cfg(feature = "quack_log")]
-                println!("lost {:?} {} (detect_lost_packets)",
-                    std::time::Instant::now(), unacked.sidecar_id);
+                println!("quack_log {:?} {} (detect_lost_packets)", now, unacked.sidecar_id);
                 self.lost_count += 1;
             } else {
                 let loss_time = match self.loss_time[epoch] {
@@ -1540,13 +1543,15 @@ impl Recovery {
         epoch: packet::Epoch, now: Instant, metadata: Option<QuackMetadata>,
     ) {
         self.bytes_in_flight = self.bytes_in_flight.saturating_sub(lost_bytes);
+        #[cfg(feature = "bytes_in_flight_log")]
+        println!("bytes_in_flight {} {:?} (on_packets_lost)", self.bytes_in_flight, now);
 
         #[cfg(feature = "cwnd_log")]
         let old_cwnd = self.cwnd();
         self.congestion_event(lost_bytes, largest_lost_pkt.time_sent, epoch, now, metadata);
         #[cfg(feature = "cwnd_log")]
         if self.cwnd() != old_cwnd {
-            println!("cwnd {} {:?} (sidecar_on_packets_lost)", self.cwnd(), now);
+            println!("cwnd {} {:?} (on_packets_lost)", self.cwnd(), now);
         }
 
         if self.in_persistent_congestion(largest_lost_pkt.pkt_num) {

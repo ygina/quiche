@@ -45,6 +45,9 @@ fuzzing = []
 # Build and expose the FFI API.
 ffi = []
 
+# Log the bytes in flight when it is updated.
+bytes_in_flight_log = []
+
 # Log the congestion window when it is updated in cubic.
 cwnd_log = []
 
