@@ -2090,6 +2090,7 @@ impl Connection {
             path.recovery.on_quack_received(quack, from)?;
         self.lost_count += lost_packets;
         self.lost_bytes += lost_bytes as u64;
+        self.update_tx_cap();
         Ok(())
     }
 
