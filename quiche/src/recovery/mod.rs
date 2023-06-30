@@ -90,7 +90,7 @@ const PACING_MULTIPLIER: f64 = 1.25;
 pub(super) const MAX_OUTSTANDING_NON_ACK_ELICITING: usize = 24;
 
 // Sidecar features
-const SIDECAR_MARK_ACKED: bool = false;
+const SIDECAR_MARK_ACKED: bool = true;
 const SIDECAR_MARK_LOST_AND_RETX: bool = true;
 const SIDECAR_UPDATE_CWND: bool = true;
 const SIDECAR_RESET_THRESHOLD: Duration = Duration::from_millis(300);
