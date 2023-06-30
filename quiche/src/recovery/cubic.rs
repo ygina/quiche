@@ -400,6 +400,7 @@ fn congestion_event(
             r.ssthresh,
             r.max_datagram_size * recovery::MINIMUM_WINDOW_PACKETS,
         );
+        #[cfg(feature = "cwnd_log")]
         println!("cwnd {} {:?} (congestion_event old={} beta={} metadata={})", r.ssthresh, Instant::now(), r.congestion_window, beta_cubic, r.congestion_recovery_metadata.is_some());
         r.congestion_window = r.ssthresh;
 
