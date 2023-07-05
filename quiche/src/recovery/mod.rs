@@ -97,7 +97,7 @@ const SIDECAR_RESET_THRESHOLD: Duration = Duration::from_millis(300);
 
 #[derive(Default)]
 pub struct DecodedQuack {
-    pub first_missing_index: Option<usize>,
+    // In increasing order.
     pub missing_indexes: Vec<usize>,
     pub missing_ids: HashSet<u32>,
     pub missing_suffix: usize,
@@ -112,15 +112,12 @@ impl DecodedQuack {
     /// is a small number of received packets after that one before the suffix.
     pub fn decode(&mut self, quack: PowerSumQuack<u32>, log: &Vec<u32>, now: Instant) {
         let coeffs = quack.to_coeffs();
-        let mut in_suffix = true;
-        for (index, &id) in log.iter().enumerate().rev() {
-            if !MonicPolynomialEvaluator::eval(&coeffs, id).is_zero() {
-                in_suffix = false;
-                continue;
+        for (index, &id) in log.iter().enumerate() {
+            if quack.last_value() == id {
+                self.missing_suffix = log.len() - index - 1;
+                break;
             }
-            self.first_missing_index = Some(index);
-            if in_suffix {
-                self.missing_suffix += 1;
+            if !MonicPolynomialEvaluator::eval(&coeffs, id).is_zero() {
                 continue;
             }
             #[cfg(feature = "quack_log")]
@@ -667,34 +664,6 @@ impl Recovery {
         //     // self.log.drain(..last_index);
         // }
 
-        // // If we suspect a large number of missing packets are in the suffix,
-        // // we can cheat the threshold and "remove" packets from the difference
-        // // quACK. It's possible we are unable to find the remaining packets if
-        // // it's the case that some of the packets in the ignored suffix were
-        // // actually received. We can check this by showing we can't factor the
-        // // coefficients from the difference quACK.
-        // let threshold = self.quack.power_sums.len();
-        // let received = quack.count();
-        // let missing = self.quack.count() - quack.count();
-        // let mut diff_quack = self.quack.clone() - quack;
-        // let mut suffix = 0;
-        // let coeffs = {
-        //     if usize::from(missing) > threshold {
-        //         suffix = usize::from(missing) - threshold;
-        //         // println!("WARN: exceeded threshold by {} {:?}",
-        //         //     suffix, Instant::now() - self.log[0].1);
-        //         // // if suffix >= SIDECAR_IGNORE_THRESHOLD {
-        //         // //     return Ok((0, 0));
-        //         // // }
-        //         // let last_index = self.log.len() - suffix;
-        //         // for (id, _, _) in &self.log[last_index..] {
-        //         //     diff_quack.remove(*id);
-        //         // }
-        //         return Ok((0, 0));
-        //     }
-        //     diff_quack.to_coeffs()
-        // };
-
         // Find the missing packets that are not in the suffix.
         let now = Instant::now();
         let epoch = packet::Epoch::Application;
@@ -745,11 +714,11 @@ impl Recovery {
         // suffix) the first time we detect them and never again. Packets in
         // the prefix of the log will also be received in the future. Remove
         // missing indexes from the quack as well.
-        for index in decoded.missing_indexes {
+        for &index in decoded.missing_indexes.iter().rev() {
             let id = self.log.remove(index);  // TODO: still O(n)
             self.quack.remove(id);
         }
-        if let Some(first_missing_index) = decoded.first_missing_index {
+        if let Some(first_missing_index) = decoded.missing_indexes.first() {
             self.log.drain(..first_missing_index);
         }
 
