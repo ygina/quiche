@@ -180,6 +180,13 @@ fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, now: Instant) {
     // First transmit when no packets in flight
     let cubic = &mut r.cubic_state;
 
+    // TODO(ygina): When we increase the server's min ack delay, the client
+    // wrongly thinks we are app limited because there are zero bytes in flight,
+    // and the client resets the cubic growth curve. We whould be able to check
+    // if the bytes in flight are zero because we very recently received an ACK
+    // that made the window go from full to empty. Regardless, we won't run into
+    // the app-limited case in our experiments so we will just disable this.
+    /*
     if let Some(last_sent_time) = cubic.last_sent_time {
         if r.bytes_in_flight == 0 {
             let delta = now - last_sent_time;
@@ -195,6 +202,7 @@ fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, now: Instant) {
             }
         }
     }
+    */
 
     cubic.last_sent_time = Some(now);
 
