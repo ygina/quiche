@@ -58,7 +58,7 @@ use smallvec::SmallVec;
 // const SIDECAR_LINK2_LOSS_DELAY: Duration = Duration::from_millis(3);
 
 // // Loss Recovery
-const DEFAULT_NEAR_SUBPATH_RATIO: f64 = 2.0 / 152.0;
+const DEFAULT_NEAR_SUBPATH_RATIO: f64 = 40.0 / 41.0;
 
 const INITIAL_PACKET_THRESHOLD: u64 = 3;
 
