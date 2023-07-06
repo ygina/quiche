@@ -95,8 +95,9 @@ const SIDECAR_MARK_LOST_AND_RETX: bool = true;
 const SIDECAR_UPDATE_CWND: bool = true;
 const SIDECAR_RESET_THRESHOLD: Duration = Duration::from_millis(300);
 
-#[derive(Default)]
+#[derive(Debug)]
 pub struct DecodedQuack {
+    pub quack: PowerSumQuack<u32>,
     // In increasing order.
     pub missing_indexes: Vec<usize>,
     pub missing_ids: HashSet<u32>,
@@ -104,39 +105,72 @@ pub struct DecodedQuack {
 }
 
 impl DecodedQuack {
+    pub fn new(quack: PowerSumQuack<u32>) -> Self {
+        DecodedQuack {
+            quack,
+            missing_indexes: Vec::new(),
+            missing_ids: HashSet::new(),
+            missing_suffix: 0,
+        }
+    }
+
+    /// Find the start of the suffix based on the last received value in the
+    /// quack and remove these for consideration from the different quack,
+    /// setting the `missing_suffix`. Returns whether we were able to find
+    /// the last received value.
+    pub fn remove_suffix(&mut self, log: &Vec<u32>) {
+        if self.quack.count() == 0 {
+            return;
+        }
+        let last_value = self.quack.last_value();
+        for (index, &id) in log.iter().enumerate().rev() {
+            if last_value == id {
+                self.missing_suffix = log.len() - index - 1;
+                // println!("suffix > threshold! {} > {}", self.missing_suffix, self.quack.threshold());
+                return;
+            } else {
+                self.quack.remove(id);
+            }
+        }
+        panic!("unable to find last value {} in log {:?}", last_value, log);
+    }
+
     /// Decodes the difference quack.
     /// The number of missing indexes should be less than the threshold. We
     /// consider the missing indexes in the suffix not to be lost, similar to
     /// a cumulative ACK up to that point. We could additionally implement
     /// TCP's reordering threshold by not considering an index missing if there
     /// is a small number of received packets after that one before the suffix.
-    pub fn decode(&mut self, quack: PowerSumQuack<u32>, log: &Vec<u32>, now: Instant) {
-        let coeffs = quack.to_coeffs();
+    pub fn decode(&mut self, log: &Vec<u32>, now: Instant) {
+        // We'd be calling this if there are missing packets in the suffix.
+        if self.quack.count() == 0 {
+            return;
+        }
+
+        let coeffs = self.quack.to_coeffs();
         for (index, &id) in log.iter().enumerate() {
-            if quack.last_value() == id {
-                self.missing_suffix = log.len() - index - 1;
+            if MonicPolynomialEvaluator::eval(&coeffs, id).is_zero() {
+                #[cfg(feature = "quack_log")]
+                println!("quack_log {:?} {} (sidecar_detect_lost_packets)", now, id);
+                self.missing_indexes.push(index);
+                if self.missing_ids.insert(id) {
+                    // It is not very likely that two packets have the same
+                    // identifier if they are truly different packets. It is
+                    // even less likely that of the packetes that go
+                    // missing, one of those has a duplicate in the log, or
+                    // that the duplicate is also missing. What happens in
+                    // this case is that it's possible we retransmit the
+                    // wrong the packet (the one with a duplicate
+                    // identifier), and the truly missing packet is
+                    // addressed in QUIC's end-to-end retransmission
+                    // mechanism. However, since the quACK polynomial
+                    // accounts for multiplicity in its roots, the math
+                    // stays sound.
+                    warn!("duplicate ID is missing: {:?}", id);
+                }
+            }
+            if self.quack.last_value() == id {
                 break;
-            }
-            if !MonicPolynomialEvaluator::eval(&coeffs, id).is_zero() {
-                continue;
-            }
-            #[cfg(feature = "quack_log")]
-            println!("quack_log {:?} {} (sidecar_detect_lost_packets)", now, id);
-            self.missing_indexes.push(index);
-            if self.missing_ids.insert(id) {
-                // It is not very likely that two packets have the same
-                // identifier if they are truly different packets. It is
-                // even less likely that of the packetes that go
-                // missing, one of those has a duplicate in the log, or
-                // that the duplicate is also missing. What happens in
-                // this case is that it's possible we retransmit the
-                // wrong the packet (the one with a duplicate
-                // identifier), and the truly missing packet is
-                // addressed in QUIC's end-to-end retransmission
-                // mechanism. However, since the quACK polynomial
-                // accounts for multiplicity in its roots, the math
-                // stays sound.
-                warn!("duplicate ID is missing: {:?}", id);
             }
         }
     }
@@ -584,8 +618,8 @@ impl Recovery {
         &mut self, quack: PowerSumQuack<u32>, from: SocketAddr,
     ) -> Result<(usize, usize)> {
         // Don't process the quack if it hasn't changed since the last one we
-        // received.
-        if self.last_decoded_quack_count == quack.count() {
+        // received. Or if no packets have been received.
+        if self.last_decoded_quack_count == quack.count() || quack.count() == 0 {
             return Ok((0, 0));
         } else {
             self.last_decoded_quack_count = quack.count();
@@ -602,14 +636,19 @@ impl Recovery {
             return Ok((0, 0));
         }
 
+        // Remove the suffix from the quack to decode.
+        let now = Instant::now();
+        let epoch = packet::Epoch::Application;
+        let mut decoded = DecodedQuack::new(self.quack.clone() - quack);
+        decoded.remove_suffix(&self.log);
+
         // We can't decode the quACK if the difference in the number of packets
         // sent and received exceeds the threshold. Send a RESET packet to the
         // proxy to resynchronize. The host keeps resending RESET packets with
         // the same quack epoch in response to each quack until it receives a
         // quack that it can decode.
         let threshold = self.quack.threshold();
-        let received = quack.count();
-        let missing = self.quack.count() - received;
+        let missing = decoded.quack.count();
         if usize::from(missing) > threshold {
             #[cfg(feature = "debug")]
             println!("exceeded quack threshold {} > {}", missing, threshold);
@@ -637,7 +676,7 @@ impl Recovery {
 
         // We "drain" packets here without going through quack decoding.
         // If the log was already empty, then it must be that missing == 0.
-        if missing == 0 {
+        if missing == 0 && decoded.missing_suffix == 0 {
             self.log = vec![];
             return Ok((0, 0));
         }
@@ -665,18 +704,15 @@ impl Recovery {
         // }
 
         // Find the missing packets that are not in the suffix.
-        let now = Instant::now();
-        let epoch = packet::Epoch::Application;
-        let mut decoded = DecodedQuack::default();
-        decoded.decode(self.quack.clone() - quack, &self.log, now);
+        decoded.decode(&self.log, now);
 
         #[cfg(feature = "debug")]
         if self.quack_epoch > 0 {
             println!(
-                "found {}+{}/{} missing (sent={}) (log {}) {:?}",
+                "found {}/{} missing (suffix={}) (sent={}) (log {}) {:?}",
                 decoded.missing_ids.len(),
-                decoded.missing_suffix,
                 missing,
+                decoded.missing_suffix,
                 self.quack.count(),
                 self.log.len(),
                 decoded.missing_ids,
