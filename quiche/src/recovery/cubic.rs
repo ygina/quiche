@@ -216,6 +216,8 @@ fn on_packets_acked(
     for pkt in packets.drain(..) {
         on_packet_acked(r, &pkt, epoch, now);
     }
+    #[cfg(feature = "bytes_in_flight_log")]
+    println!("bytes_in_flight {} {:?} (on_packets_acked)", r.bytes_in_flight, now);
 }
 
 fn on_packet_acked(
@@ -229,8 +231,6 @@ fn on_packet_acked(
     };
 
     r.bytes_in_flight = r.bytes_in_flight.saturating_sub(packet.size);
-    #[cfg(feature = "bytes_in_flight_log")]
-    println!("bytes_in_flight {} {:?} (on_packet_acked)", r.bytes_in_flight, now);
 
     if in_congestion_recovery {
         r.prr.on_packet_acked(
@@ -281,11 +281,11 @@ fn on_packet_acked(
                 r.congestion_window +=
                     r.hystart.css_cwnd_inc(r.max_datagram_size);
                 #[cfg(feature = "cwnd_log")]
-                println!("cwnd {} {:?} (cubic::on_packet_acked 1)", r.cwnd(), std::time::Instant::now());
+                println!("cwnd {} {:?} (cubic::on_packet_acked 1)", r.cwnd(), now);
             } else {
                 r.congestion_window += r.max_datagram_size;
                 #[cfg(feature = "cwnd_log")]
-                println!("cwnd {} {:?} (cubic::on_packet_acked 2)", r.cwnd(), std::time::Instant::now());
+                println!("cwnd {} {:?} (cubic::on_packet_acked 2)", r.cwnd(), now);
             }
 
             r.bytes_acked_sl -= r.max_datagram_size;
@@ -370,7 +370,7 @@ fn on_packet_acked(
         if r.cubic_state.cwnd_inc >= r.max_datagram_size {
             r.congestion_window += r.max_datagram_size;
             #[cfg(feature = "cwnd_log")]
-            println!("cwnd {} {:?} (cubic::on_packet_acked 3)", r.cwnd(), std::time::Instant::now());
+            println!("cwnd {} {:?} (cubic::on_packet_acked 3)", r.cwnd(), now);
             r.cubic_state.cwnd_inc -= r.max_datagram_size;
         }
     }
@@ -409,7 +409,7 @@ fn congestion_event(
             r.max_datagram_size * recovery::MINIMUM_WINDOW_PACKETS,
         );
         #[cfg(feature = "cwnd_log")]
-        println!("cwnd {} {:?} (congestion_event old={} beta={} metadata={})", r.ssthresh, Instant::now(), r.congestion_window, beta_cubic, r.congestion_recovery_metadata.is_some());
+        println!("cwnd {} {:?} (congestion_event old={} beta={} metadata={})", r.ssthresh, now, r.congestion_window, beta_cubic, r.congestion_recovery_metadata.is_some());
         r.congestion_window = r.ssthresh;
 
         r.cubic_state.k = if r.cubic_state.w_max < r.congestion_window as f64 {

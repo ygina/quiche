@@ -118,21 +118,22 @@ impl DecodedQuack {
     /// quack and remove these for consideration from the different quack,
     /// setting the `missing_suffix`. Returns whether we were able to find
     /// the last received value.
-    pub fn remove_suffix(&mut self, log: &Vec<u32>) {
+    pub fn remove_suffix(&mut self, log: &Vec<u32>) -> bool {
         if self.quack.count() == 0 {
-            return;
+            return true;
         }
         let last_value = self.quack.last_value();
         for (index, &id) in log.iter().enumerate().rev() {
             if last_value == id {
                 self.missing_suffix = log.len() - index - 1;
-                // println!("suffix > threshold! {} > {}", self.missing_suffix, self.quack.threshold());
-                return;
+                return true;
             } else {
                 self.quack.remove(id);
             }
         }
-        panic!("unable to find last value {} in log {:?}", last_value, log);
+        #[cfg(feature = "debug")]
+        println!("unable to find last value {} in log {:?}", last_value, log);
+        false
     }
 
     /// Decodes the difference quack.
@@ -537,6 +538,8 @@ impl Recovery {
         }
         #[cfg(feature = "quack_log")]
         println!("quack_log {:?} {} (sent) {}", now, pkt.sidecar_id, self.quack.count());
+        #[cfg(feature = "bytes_in_flight_log")]
+        println!("bytes_in_flight {} {:?} (on_packet_sent)", self.bytes_in_flight, now);
 
         self.sent[epoch].push_back(pkt);
 
@@ -640,7 +643,10 @@ impl Recovery {
         let now = Instant::now();
         let epoch = packet::Epoch::Application;
         let mut decoded = DecodedQuack::new(self.quack.clone() - quack);
-        decoded.remove_suffix(&self.log);
+        if !decoded.remove_suffix(&self.log) {
+            self.send_quack_reset(from)?;
+            return Ok((0, 0));
+        }
 
         // We can't decode the quACK if the difference in the number of packets
         // sent and received exceeds the threshold. Send a RESET packet to the
@@ -654,6 +660,12 @@ impl Recovery {
             println!("exceeded quack threshold {} > {}", missing, threshold);
             self.send_quack_reset(from)?;
             return Ok((0, 0));
+        }
+
+        #[cfg(feature = "debug")]
+        if usize::from(missing) + decoded.missing_suffix > threshold {
+            println!("we would have exceeded the threshold! {} + {} > {}",
+                missing, decoded.missing_suffix, threshold);
         }
 
         #[cfg(feature = "debug")]
@@ -889,17 +901,10 @@ impl Recovery {
                 near_subpath_ratio: DEFAULT_NEAR_SUBPATH_RATIO,
             };
 
-            #[cfg(feature = "cwnd_log")]
-            let old_cwnd = self.cwnd();
             self.congestion_event(
                 lost_bytes, pkt.time_sent, epoch, now, Some(metadata));
             #[cfg(feature = "cwnd_log")]
-            if self.cwnd() != old_cwnd {
-                println!("cwnd {} {:?} (sidecar_on_packets_lost)", self.cwnd(), now);
-            }
-            // if self.in_persistent_congestion(pkt.pkt_num) {
-            //     self.collapse_cwnd();
-            // }
+            println!("cwnd {} {:?} (sidecar_on_packets_lost)", self.cwnd(), now);
         }
     }
 
@@ -907,13 +912,9 @@ impl Recovery {
         &mut self, now: Instant, epoch: packet::Epoch, acked: &mut Vec<Acked>
     ) {
         if !acked.is_empty() {
-            #[cfg(feature = "cwnd_log")]
-            let old_cwnd = self.cwnd();
             self.on_packets_acked(acked, epoch, now);
             #[cfg(feature = "cwnd_log")]
-            if self.cwnd() != old_cwnd {
-                println!("cwnd {} {:?} (sidecar_on_packets_acked)", self.cwnd(), now);
-            }
+            println!("cwnd {} {:?} (sidecar_on_packets_acked)", self.cwnd(), now);
         }
     }
 
@@ -1086,13 +1087,9 @@ impl Recovery {
         let (lost_packets, lost_bytes) =
             self.detect_lost_packets(epoch, now, trace_id);
 
-        #[cfg(feature = "cwnd_log")]
-        let old_cwnd = self.cwnd();
         self.on_packets_acked(newly_acked, epoch, now);
         #[cfg(feature = "cwnd_log")]
-        if self.cwnd() != old_cwnd {
-            println!("cwnd {} {:?} (on_packets_acked)", self.cwnd(), now);
-        }
+        println!("cwnd {} {:?} (on_packets_acked)", self.cwnd(), now);
 
         self.pto_count = 0;
 
@@ -1551,13 +1548,9 @@ impl Recovery {
         #[cfg(feature = "bytes_in_flight_log")]
         println!("bytes_in_flight {} {:?} (on_packets_lost)", self.bytes_in_flight, now);
 
-        #[cfg(feature = "cwnd_log")]
-        let old_cwnd = self.cwnd();
         self.congestion_event(lost_bytes, largest_lost_pkt.time_sent, epoch, now, metadata);
         #[cfg(feature = "cwnd_log")]
-        if self.cwnd() != old_cwnd {
-            println!("cwnd {} {:?} (on_packets_lost)", self.cwnd(), now);
-        }
+        println!("cwnd {} {:?} (on_packets_lost)", self.cwnd(), now);
 
         if self.in_persistent_congestion(largest_lost_pkt.pkt_num) {
             self.collapse_cwnd();
