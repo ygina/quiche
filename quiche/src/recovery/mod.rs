@@ -733,13 +733,19 @@ impl Recovery {
 
         // Detect and mark acked packets, without removing them from the sent
         // packets list.
-        let mut newly_acked = if SIDECAR_MARK_ACKED {
+        let (mut newly_acked, largest_newly_acked_sent_time) = if SIDECAR_MARK_ACKED {
             self.sidecar_mark_acked_packets(&decoded, now, epoch)
         } else {
-            Vec::new()
+            (Vec::new(), now)
         };
         if SIDECAR_MARK_ACKED && newly_acked.is_empty() {
             return Ok((0, 0));
+        }
+
+        if !newly_acked.is_empty() {
+            let latest_rtt =
+                now.saturating_duration_since(largest_newly_acked_sent_time);
+            self.update_rtt(latest_rtt, Duration::ZERO, now);
         }
 
         // Detect and mark lost packets, without removing them from the sent
@@ -776,7 +782,7 @@ impl Recovery {
     /// Returns whether any packets were newly acked.
     fn sidecar_mark_acked_packets(
         &mut self, decoded: &DecodedQuack, now: Instant, epoch: packet::Epoch,
-    ) -> Vec<Acked> {
+    ) -> (Vec<Acked>, Instant) {
         // Get the identifiers of everything from 0 to log.len()-suffix and not
         // in missing indexes. These are the acked packets in the log.
         let mut acked_ids = HashSet::new();
@@ -786,12 +792,13 @@ impl Recovery {
             }
         }
         if acked_ids.is_empty() {
-            return Vec::new();
+            return (Vec::new(), now);
         }
 
         // Map these identifiers to packet numbers in self.sent and mark them
         // as acked.
         let mut newly_acked = Vec::new();
+        let mut largest_newly_acked_sent_time = now;
 
         let unacked_iter = self.sent[epoch]
             .iter_mut()
@@ -806,6 +813,7 @@ impl Recovery {
             }
 
             unacked.time_acked_sidecar = Some(now);
+            largest_newly_acked_sent_time = unacked.time_sent;
 
             #[cfg(feature = "quack_log")]
             println!("quack_log {:?} {} (quacked)", now, unacked.sidecar_id);
@@ -829,7 +837,7 @@ impl Recovery {
             });
         }
 
-        newly_acked
+        (newly_acked, largest_newly_acked_sent_time)
     }
 
     fn sidecar_mark_lost_packets(
