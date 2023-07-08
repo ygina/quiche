@@ -114,35 +114,13 @@ impl DecodedQuack {
         }
     }
 
-    /// Find the start of the suffix based on the last received value in the
-    /// quack and remove these for consideration from the different quack,
-    /// setting the `missing_suffix`. Returns whether we were able to find
-    /// the last received value.
-    pub fn remove_suffix(&mut self, log: &Vec<u32>) -> bool {
-        if self.quack.count() == 0 {
-            return true;
-        }
-        let last_value = self.quack.last_value();
-        for (index, &id) in log.iter().enumerate().rev() {
-            if last_value == id {
-                self.missing_suffix = log.len() - index - 1;
-                return true;
-            } else {
-                self.quack.remove(id);
-            }
-        }
-        #[cfg(feature = "debug")]
-        println!("unable to find last value {} in log {:?}", last_value, log);
-        false
-    }
-
     /// Decodes the difference quack.
     /// The number of missing indexes should be less than the threshold. We
     /// consider the missing indexes in the suffix not to be lost, similar to
     /// a cumulative ACK up to that point. We could additionally implement
     /// TCP's reordering threshold by not considering an index missing if there
     /// is a small number of received packets after that one before the suffix.
-    pub fn decode(&mut self, log: &Vec<u32>, now: Instant) {
+    pub fn decode(&mut self, log: &[u32], now: Instant) {
         // We'd be calling this if there are missing packets in the suffix.
         if self.quack.count() == 0 {
             return;
@@ -169,9 +147,6 @@ impl DecodedQuack {
                     // stays sound.
                     warn!("duplicate ID is missing: {:?}", id);
                 }
-            }
-            if self.quack.last_value() == id {
-                break;
             }
         }
     }
@@ -286,6 +261,7 @@ pub struct Recovery {
     stats_max_quack_reset: Duration,
 
     quack_epoch: u8,
+    next_log_index: usize,
     log: Vec<u32>,
 }
 
@@ -438,6 +414,8 @@ impl Recovery {
 
             quack_epoch: 0,
 
+            next_log_index: 0,
+
             log: vec![],
         }
     }
@@ -533,7 +511,6 @@ impl Recovery {
             .on_packet_sent(&mut pkt, self.bytes_in_flight - sent_bytes);
 
         if self.sidecar {
-            self.quack.insert(pkt.sidecar_id);
             self.log.push(pkt.sidecar_id);
         }
         #[cfg(feature = "quack_log")]
@@ -581,12 +558,10 @@ impl Recovery {
         self.pacer.send(sent_bytes, now);
     }
 
-    fn send_quack_reset(&mut self, addr: SocketAddr) -> Result<()> {
+    fn send_quack_reset(&mut self, addr: SocketAddr, now: Instant) -> Result<()> {
         if !self.quack_reset {
             return Ok(());
         }
-
-        let now = Instant::now();
 
         // This time threshold should be long enough that if the host and proxy
         // are not in a valid state at this point, we can assume the previous
@@ -613,6 +588,7 @@ impl Recovery {
             self.quack = PowerSumQuack::new(self.quack.threshold());
             self.last_decoded_quack_count = 0;
             self.log = vec![];
+            self.next_log_index = 0;
         }
         Ok(())
     }
@@ -628,23 +604,26 @@ impl Recovery {
             self.last_decoded_quack_count = quack.count();
         }
 
+        // Add up to the last packet received to the sender's quack.
+        while self.next_log_index < self.log.len() {
+            let sidecar_id = self.log[self.next_log_index];
+            self.next_log_index += 1;
+            self.quack.insert(sidecar_id);
+            if sidecar_id == quack.last_value() {
+                break;
+            }
+        }
+
         // Either the counts overflowed, or we sent a RESET packet that hasn't
         // been synchronized at the proxy yet. Either way, send a RESET if it
         // has been more than an RTT (of the quack subpath).
-        if self.quack.count() < quack.count() {
-            #[cfg(feature = "debug")]
-            println!("overflowed or sender hasn't processed reset, expected {} < {}",
-                quack.count(), self.quack.count());
-            self.send_quack_reset(from)?;
-            return Ok((0, 0));
-        }
-
-        // Remove the suffix from the quack to decode.
         let now = Instant::now();
         let epoch = packet::Epoch::Application;
-        let mut decoded = DecodedQuack::new(self.quack.clone() - quack);
-        if !decoded.remove_suffix(&self.log) {
-            self.send_quack_reset(from)?;
+        if self.quack.count() < quack.count() {
+            #[cfg(feature = "debug")]
+            println!("overflowed or sender hasn't processed reset, expected {} <= {}",
+                quack.count(), self.quack.count());
+            self.send_quack_reset(from, now)?;
             return Ok((0, 0));
         }
 
@@ -654,18 +633,12 @@ impl Recovery {
         // the same quack epoch in response to each quack until it receives a
         // quack that it can decode.
         let threshold = self.quack.threshold();
-        let missing = decoded.quack.count();
+        let missing = self.quack.count() - quack.count();
         if usize::from(missing) > threshold {
             #[cfg(feature = "debug")]
             println!("exceeded quack threshold {} > {}", missing, threshold);
-            self.send_quack_reset(from)?;
+            self.send_quack_reset(from, now)?;
             return Ok((0, 0));
-        }
-
-        #[cfg(feature = "debug")]
-        if usize::from(missing) + decoded.missing_suffix > threshold {
-            println!("we would have exceeded the threshold! {} + {} > {}",
-                missing, decoded.missing_suffix, threshold);
         }
 
         #[cfg(feature = "debug")]
@@ -688,8 +661,9 @@ impl Recovery {
 
         // We "drain" packets here without going through quack decoding.
         // If the log was already empty, then it must be that missing == 0.
-        if missing == 0 && decoded.missing_suffix == 0 {
+        if missing == 0 && self.next_log_index == self.log.len() {
             self.log = vec![];
+            self.next_log_index = 0;
             return Ok((0, 0));
         }
 
@@ -716,7 +690,8 @@ impl Recovery {
         // }
 
         // Find the missing packets that are not in the suffix.
-        decoded.decode(&self.log, now);
+        let mut decoded = DecodedQuack::new(self.quack.clone() - quack);
+        decoded.decode(&self.log[..self.next_log_index], now);
 
         #[cfg(feature = "debug")]
         if self.quack_epoch > 0 {
@@ -724,7 +699,7 @@ impl Recovery {
                 "found {}/{} missing (suffix={}) (sent={}) (log {}) {:?}",
                 decoded.missing_ids.len(),
                 missing,
-                decoded.missing_suffix,
+                self.log.len() - self.next_log_index,
                 self.quack.count(),
                 self.log.len(),
                 decoded.missing_ids,
@@ -768,12 +743,14 @@ impl Recovery {
         // suffix) the first time we detect them and never again. Packets in
         // the prefix of the log will also be received in the future. Remove
         // missing indexes from the quack as well.
+        self.next_log_index -= decoded.missing_indexes.len();
         for &index in decoded.missing_indexes.iter().rev() {
             let id = self.log.remove(index);  // TODO: still O(n)
             self.quack.remove(id);
         }
         if let Some(first_missing_index) = decoded.missing_indexes.first() {
             self.log.drain(..first_missing_index);
+            self.next_log_index -= first_missing_index;
         }
 
         Ok((lost_packets, lost_bytes))
@@ -786,9 +763,9 @@ impl Recovery {
         // Get the identifiers of everything from 0 to log.len()-suffix and not
         // in missing indexes. These are the acked packets in the log.
         let mut acked_ids = HashSet::new();
-        for i in 0..(self.log.len() - decoded.missing_suffix) {
-            if !decoded.missing_ids.contains(&self.log[i]) {
-                acked_ids.insert(self.log[i]);
+        for &sidecar_id in &self.log[..self.next_log_index] {
+            if !decoded.missing_ids.contains(&sidecar_id) {
+                acked_ids.insert(sidecar_id);
             }
         }
         if acked_ids.is_empty() {
