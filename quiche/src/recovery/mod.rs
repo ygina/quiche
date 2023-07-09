@@ -739,19 +739,13 @@ impl Recovery {
                 now, epoch, &mut newly_acked);
         }
 
-        // Clean up the log, assuming we handle missing indexes (outside the
-        // suffix) the first time we detect them and never again. Packets in
-        // the prefix of the log will also be received in the future. Remove
-        // missing indexes from the quack as well.
-        self.next_log_index -= decoded.missing_indexes.len();
-        for &index in decoded.missing_indexes.iter().rev() {
-            let id = self.log.remove(index);  // TODO: still O(n)
-            self.quack.remove(id);
+        // Everything we drain from the log has already been determined to
+        // be quacked or lost.
+        for index in decoded.missing_indexes {
+            self.quack.remove(self.log[index]);
         }
-        if let Some(first_missing_index) = decoded.missing_indexes.first() {
-            self.log.drain(..first_missing_index);
-            self.next_log_index -= first_missing_index;
-        }
+        self.log.drain(..self.next_log_index);
+        self.next_log_index = 0;
 
         Ok((lost_packets, lost_bytes))
     }
