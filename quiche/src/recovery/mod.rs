@@ -101,6 +101,7 @@ pub struct DecodedQuack {
     // In increasing order.
     pub missing_indexes: Vec<usize>,
     pub missing_ids: HashSet<u32>,
+    pub acked_ids: HashSet<u32>,
 }
 
 impl DecodedQuack {
@@ -109,6 +110,7 @@ impl DecodedQuack {
             quack,
             missing_indexes: Vec::new(),
             missing_ids: HashSet::new(),
+            acked_ids: HashSet::new(),
         }
     }
 
@@ -121,6 +123,7 @@ impl DecodedQuack {
     pub fn decode(&mut self, log: &[u32], now: Instant) {
         // We'd be calling this if there are missing packets in the suffix.
         if self.quack.count() == 0 {
+            self.acked_ids = log.iter().map(|&id| id).collect();
             return;
         }
 
@@ -145,6 +148,8 @@ impl DecodedQuack {
                     // stays sound.
                     warn!("duplicate ID is missing: {:?}", id);
                 }
+            } else {
+                self.acked_ids.insert(id);
             }
         }
     }
@@ -707,7 +712,7 @@ impl Recovery {
         // Detect and mark acked packets, without removing them from the sent
         // packets list.
         let (mut newly_acked, largest_newly_acked_sent_time) = if SIDECAR_MARK_ACKED {
-            self.sidecar_mark_acked_packets(&decoded, now, epoch)
+            self.sidecar_mark_acked_packets(decoded.acked_ids, now, epoch)
         } else {
             (Vec::new(), now)
         };
@@ -724,7 +729,7 @@ impl Recovery {
         // Detect and mark lost packets, without removing them from the sent
         // packets list.
         let (lost_bytes, lost_packets, largest_lost_pkt) = if SIDECAR_MARK_LOST_AND_RETX {
-            self.sidecar_mark_lost_packets(&decoded, now, epoch)
+            self.sidecar_mark_lost_packets(decoded.missing_ids, now, epoch)
         } else {
             (0, 0, None)
         };
@@ -750,16 +755,8 @@ impl Recovery {
 
     /// Returns whether any packets were newly acked.
     fn sidecar_mark_acked_packets(
-        &mut self, decoded: &DecodedQuack, now: Instant, epoch: packet::Epoch,
+        &mut self, mut acked_ids: HashSet<u32>, now: Instant, epoch: packet::Epoch,
     ) -> (Vec<Acked>, Instant) {
-        // Get the identifiers of everything from 0 to log.len()-suffix and not
-        // in missing indexes. These are the acked packets in the log.
-        let mut acked_ids = HashSet::new();
-        for &sidecar_id in &self.log[..self.next_log_index] {
-            if !decoded.missing_ids.contains(&sidecar_id) {
-                acked_ids.insert(sidecar_id);
-            }
-        }
         if acked_ids.is_empty() {
             return (Vec::new(), now);
         }
@@ -810,9 +807,9 @@ impl Recovery {
     }
 
     fn sidecar_mark_lost_packets(
-        &mut self, decoded: &DecodedQuack, now: Instant, epoch: packet::Epoch,
+        &mut self, mut missing_ids: HashSet<u32>, now: Instant, epoch: packet::Epoch,
     ) -> (usize, usize, Option<Sent>) {
-        if decoded.missing_ids.is_empty() {
+        if missing_ids.is_empty() {
             return (0, 0, None);
         }
 
@@ -824,7 +821,6 @@ impl Recovery {
         let mut lost_bytes = 0;
         let mut lost_packets = 0;
         let mut largest_lost_pkt = None;
-        let mut missing_ids = decoded.missing_ids.clone();
         for unacked in unacked_iter {
             if missing_ids.is_empty() {
                 break;
