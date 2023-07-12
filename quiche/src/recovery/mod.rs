@@ -94,6 +94,7 @@ const SIDECAR_MARK_ACKED: bool = true;
 const SIDECAR_MARK_LOST_AND_RETX: bool = true;
 const SIDECAR_UPDATE_CWND: bool = true;
 const SIDECAR_RESET_THRESHOLD: Duration = Duration::from_millis(300);
+const SIDECAR_REORDER_THRESHOLD: usize = 3;
 
 #[derive(Debug)]
 pub struct DecodedQuack {
@@ -102,6 +103,7 @@ pub struct DecodedQuack {
     pub missing_indexes: Vec<usize>,
     pub missing_ids: HashSet<u32>,
     pub acked_ids: HashSet<u32>,
+    pub num_reordered: usize,
 }
 
 impl DecodedQuack {
@@ -111,6 +113,7 @@ impl DecodedQuack {
             missing_indexes: Vec::new(),
             missing_ids: HashSet::new(),
             acked_ids: HashSet::new(),
+            num_reordered: 0,
         }
     }
 
@@ -130,8 +133,6 @@ impl DecodedQuack {
         let coeffs = self.quack.to_coeffs();
         for (index, &id) in log.iter().enumerate() {
             if MonicPolynomialEvaluator::eval(&coeffs, id).is_zero() {
-                #[cfg(feature = "quack_log")]
-                println!("quack_log {:?} {} (sidecar_detect_lost_packets)", now, id);
                 self.missing_indexes.push(index);
                 if self.missing_ids.insert(id) {
                     // It is not very likely that two packets have the same
@@ -151,6 +152,28 @@ impl DecodedQuack {
             } else {
                 self.acked_ids.insert(id);
             }
+        }
+
+        // If any of the SIDECAR_REORDER_THRESHOLD packets before the last
+        // received packet are missing, wait to determine their fate.
+        let min_reorder_index = if log.len() > SIDECAR_REORDER_THRESHOLD {
+            log.len() - (SIDECAR_REORDER_THRESHOLD + 1)
+        } else {
+            0
+        };
+        while let Some(&missing_index) = self.missing_indexes.last() {
+            if missing_index >= min_reorder_index {
+                self.missing_ids.remove(&log[missing_index]);
+                self.missing_indexes.pop();
+                self.num_reordered = log.len() - missing_index;
+            } else {
+                break;
+            }
+        }
+
+        #[cfg(feature = "quack_log")]
+        for id in &self.missing_ids {
+            println!("quack_log {:?} {} (sidecar_detect_lost_packets)", now, id);
         }
     }
 }
@@ -747,8 +770,8 @@ impl Recovery {
         for index in decoded.missing_indexes {
             self.quack.remove(self.log[index]);
         }
-        self.log.drain(..self.next_log_index);
-        self.next_log_index = 0;
+        self.log.drain(..(self.next_log_index - decoded.num_reordered));
+        self.next_log_index = decoded.num_reordered;
 
         Ok((lost_packets, lost_bytes))
     }
