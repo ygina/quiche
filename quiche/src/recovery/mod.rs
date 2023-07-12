@@ -101,7 +101,6 @@ pub struct DecodedQuack {
     // In increasing order.
     pub missing_indexes: Vec<usize>,
     pub missing_ids: HashSet<u32>,
-    pub missing_suffix: usize,
 }
 
 impl DecodedQuack {
@@ -110,7 +109,6 @@ impl DecodedQuack {
             quack,
             missing_indexes: Vec::new(),
             missing_ids: HashSet::new(),
-            missing_suffix: 0,
         }
     }
 
