@@ -58,6 +58,7 @@ use smallvec::SmallVec;
 // const SIDECAR_LINK2_LOSS_DELAY: Duration = Duration::from_millis(3);
 
 // // Loss Recovery
+// const DEFAULT_NEAR_SUBPATH_RATIO: f64 = 2.0 / 152.0;
 const DEFAULT_NEAR_SUBPATH_RATIO: f64 = 40.0 / 41.0;
 
 const INITIAL_PACKET_THRESHOLD: u64 = 3;
@@ -93,6 +94,7 @@ pub(super) const MAX_OUTSTANDING_NON_ACK_ELICITING: usize = 24;
 const SIDECAR_MARK_ACKED: bool = true;
 const SIDECAR_MARK_LOST_AND_RETX: bool = true;
 const SIDECAR_UPDATE_CWND: bool = true;
+// const SIDECAR_RESET_THRESHOLD: Duration = Duration::from_millis(10);
 const SIDECAR_RESET_THRESHOLD: Duration = Duration::from_millis(300);
 const SIDECAR_REORDER_THRESHOLD: usize = 3;
 
@@ -276,7 +278,7 @@ pub struct Recovery {
     sidecar: bool,
     quack_reset: bool,
     quack: PowerSumQuack<u32>,
-    last_decoded_quack_count: u16,
+    last_decoded_quack_count: u32,
     last_quack_reset: Instant,
 
     #[cfg(feature = "debug")]
@@ -660,7 +662,7 @@ impl Recovery {
         // quack that it can decode.
         let threshold = self.quack.threshold();
         let missing = self.quack.count() - quack.count();
-        if usize::from(missing) > threshold {
+        if missing as usize > threshold {
             #[cfg(feature = "debug")]
             println!("exceeded quack threshold {} > {}", missing, threshold);
             self.send_quack_reset(from, now)?;
