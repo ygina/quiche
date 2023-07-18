@@ -58,9 +58,6 @@ use smallvec::SmallVec;
 // const SIDECAR_LINK2_LOSS_DELAY: Duration = Duration::from_millis(3);
 
 // // Loss Recovery
-// const DEFAULT_NEAR_SUBPATH_RATIO: f64 = 2.0 / 152.0;
-const DEFAULT_NEAR_SUBPATH_RATIO: f64 = 40.0 / 41.0;
-
 const INITIAL_PACKET_THRESHOLD: u64 = 3;
 
 const MAX_PACKET_THRESHOLD: u64 = 20;
@@ -91,11 +88,19 @@ const PACING_MULTIPLIER: f64 = 1.25;
 pub(super) const MAX_OUTSTANDING_NON_ACK_ELICITING: usize = 24;
 
 // Sidecar features
+
+// // Client-side retransmission
+// const DEFAULT_NEAR_SUBPATH_RATIO: f64 = 2.0 / 152.0;
+// const SIDECAR_MARK_ACKED: bool = false;
+// const SIDECAR_RESET_THRESHOLD: Duration = Duration::from_millis(10);
+
+// ACK reduction
+const DEFAULT_NEAR_SUBPATH_RATIO: f64 = 40.0 / 41.0;
 const SIDECAR_MARK_ACKED: bool = true;
+const SIDECAR_RESET_THRESHOLD: Duration = Duration::from_millis(300);
+
 const SIDECAR_MARK_LOST_AND_RETX: bool = true;
 const SIDECAR_UPDATE_CWND: bool = true;
-// const SIDECAR_RESET_THRESHOLD: Duration = Duration::from_millis(10);
-const SIDECAR_RESET_THRESHOLD: Duration = Duration::from_millis(300);
 const SIDECAR_REORDER_THRESHOLD: usize = 3;
 
 #[derive(Debug)]
