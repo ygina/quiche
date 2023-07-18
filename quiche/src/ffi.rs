@@ -153,6 +153,13 @@ pub extern fn quiche_config_new(version: u32) -> *mut Config {
 }
 
 #[no_mangle]
+pub extern fn quiche_config_set_quack_style(
+    config: &mut Config, style: QuackStyle,
+) {
+    config.set_quack_style(style);
+}
+
+#[no_mangle]
 pub extern fn quiche_config_load_cert_chain_from_pem_file(
     config: &mut Config, path: *const c_char,
 ) -> c_int {

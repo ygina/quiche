@@ -731,6 +731,7 @@ pub struct Config {
     sidecar_threshold: usize,
     quack_reset: bool,
     sidecar_mtu: bool,
+    quack_style: QuackStyle,
 }
 
 // See https://quicwg.org/base-drafts/rfc9000.html#section-15
@@ -794,6 +795,7 @@ impl Config {
             sidecar_threshold: 0,
             quack_reset: true,
             sidecar_mtu: false,
+            quack_style: QuackStyle::PowerSum,
         })
     }
 
@@ -1153,6 +1155,13 @@ impl Config {
     /// The default value is `CongestionControlAlgorithm::CUBIC`.
     pub fn set_cc_algorithm(&mut self, algo: CongestionControlAlgorithm) {
         self.cc_algorithm = algo;
+    }
+
+    /// Sets the quack style used.
+    ///
+    /// The default value is `QuackStyle::PowerSum`.
+    pub fn set_quack_style(&mut self, style: QuackStyle) {
+        self.quack_style = style;
     }
 
     /// Sets the sidecar quACK threshold.
@@ -15925,6 +15934,7 @@ pub use crate::path::PathStats;
 pub use crate::path::SocketAddrIter;
 
 pub use crate::recovery::CongestionControlAlgorithm;
+pub use crate::recovery::QuackStyle;
 
 pub use crate::stream::StreamIter;
 

@@ -1618,6 +1618,20 @@ pub enum CongestionControlAlgorithm {
     BBR   = 2,
 }
 
+/// Available quack styles.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[repr(C)]
+pub enum QuackStyle {
+    /// The coding power sum quack.
+    PowerSum  = 0,
+    /// Echo the identifier of every packet, once.
+    StrawmanA = 1,
+    /// TBD
+    StrawmanB = 2,
+    /// TBD
+    StrawmanC = 3,
+}
+
 impl FromStr for CongestionControlAlgorithm {
     type Err = crate::Error;
 

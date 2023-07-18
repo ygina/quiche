@@ -139,6 +139,16 @@ typedef struct quiche_config quiche_config;
 // Creates a config object with the given version.
 quiche_config *quiche_config_new(uint32_t version);
 
+enum quiche_quack_style {
+    QUICHE_QUACK_POWER_SUM = 0,
+    QUICHE_QUACK_STRAWMAN_A = 1,
+    QUICHE_QUACK_STRAWMAN_B = 2,
+    QUICHE_QUACK_STRAWMAN_C = 2,
+};
+
+// Set the style of quack to send and receive.
+void quiche_config_set_quack_style(quiche_config *config, enum quiche_quack_style style);
+
 // Configures the given certificate chain.
 int quiche_config_load_cert_chain_from_pem_file(quiche_config *config,
                                                 const char *path);
