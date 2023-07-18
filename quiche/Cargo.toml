@@ -57,6 +57,12 @@ quack_log = []
 # Debug logging when quacks are received
 debug = []
 
+# Power sum quack
+power_sum = []
+
+# Echo identifier of every packet
+strawman_a = []
+
 [package.metadata.docs.rs]
 no-default-features = true
 features = ["boringssl-boring-crate", "qlog"]

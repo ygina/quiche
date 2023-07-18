@@ -56,4 +56,4 @@ clean:
 
 .PHONY: sidecar
 sidecar:
-	cargo build --package quiche --release --features ffi,pkg-config-meta,qlog
+	cargo build --package quiche --release --features ffi,pkg-config-meta,qlog,power_sum

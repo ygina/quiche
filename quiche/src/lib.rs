@@ -412,7 +412,7 @@ use std::str::FromStr;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 
-use quack::PowerSumQuack;
+use quack::*;
 use sidecar::ID_OFFSET;
 use smallvec::SmallVec;
 
@@ -2086,9 +2086,29 @@ impl Connection {
     }
 
     /// Process quACKs received from a sidecar.
+    #[cfg(feature = "power_sum")]
     pub fn recv_quack(
         &mut self,
         quack: PowerSumQuack<u32>,
+        from: SocketAddr,
+    ) -> Result<()> {
+        if self.paths.len() != 1 {
+            return Err(Error::SidecarMultiplePaths);
+        }
+        let path = self.paths.get_active_mut()?;
+        let (lost_packets, lost_bytes) =
+            path.recovery.on_quack_received(quack, from)?;
+        self.lost_count += lost_packets;
+        self.lost_bytes += lost_bytes as u64;
+        self.update_tx_cap();
+        Ok(())
+    }
+
+    /// Process quACKs received from a sidecar.
+    #[cfg(feature = "strawman_a")]
+    pub fn recv_quack(
+        &mut self,
+        quack: StrawmanAQuack,
         from: SocketAddr,
     ) -> Result<()> {
         if self.paths.len() != 1 {

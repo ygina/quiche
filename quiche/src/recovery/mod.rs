@@ -52,6 +52,8 @@ use quack::{
     Quack, PowerSumQuack,
     arithmetic::{MonicPolynomialEvaluator, ModularArithmetic},
 };
+#[cfg(feature = "strawman_a")]
+use quack::StrawmanAQuack;
 use smallvec::SmallVec;
 
 // // For the e2e loss detection timeout it's RRT * packet thresh
@@ -105,7 +107,10 @@ const SIDECAR_REORDER_THRESHOLD: usize = 3;
 
 #[derive(Debug)]
 pub struct DecodedQuack {
+    #[cfg(feature = "power_sum")]
     pub quack: PowerSumQuack<u32>,
+    #[cfg(feature = "strawman_a")]
+    pub quack: StrawmanAQuack,
     // In increasing order.
     pub missing_indexes: Vec<usize>,
     pub missing_ids: HashSet<u32>,
@@ -114,7 +119,19 @@ pub struct DecodedQuack {
 }
 
 impl DecodedQuack {
+    #[cfg(feature = "power_sum")]
     pub fn new(quack: PowerSumQuack<u32>) -> Self {
+        DecodedQuack {
+            quack,
+            missing_indexes: Vec::new(),
+            missing_ids: HashSet::new(),
+            acked_ids: HashSet::new(),
+            num_reordered: 0,
+        }
+    }
+
+    #[cfg(feature = "strawman_a")]
+    pub fn new(quack: StrawmanAQuack) -> Self {
         DecodedQuack {
             quack,
             missing_indexes: Vec::new(),
@@ -130,6 +147,7 @@ impl DecodedQuack {
     /// a cumulative ACK up to that point. We could additionally implement
     /// TCP's reordering threshold by not considering an index missing if there
     /// is a small number of received packets after that one before the suffix.
+    #[cfg(feature = "power_sum")]
     pub fn decode(&mut self, log: &[u32], now: Instant) {
         // We'd be calling this if there are missing packets in the suffix.
         if self.quack.count() == 0 {
@@ -181,6 +199,24 @@ impl DecodedQuack {
         #[cfg(feature = "quack_log")]
         for id in &self.missing_ids {
             println!("quack_log {:?} {} (sidecar_detect_lost_packets)", now, id);
+        }
+    }
+
+    #[cfg(feature = "strawman_a")]
+    pub fn decode(&mut self, log: &[u32], now: Instant) {
+        for (i, &sidecar_id) in log.iter().enumerate() {
+            if sidecar_id == self.quack.sidecar_id {
+                self.acked_ids.insert(sidecar_id);
+                break;
+            } else {
+                self.missing_indexes.push(i);
+                self.missing_ids.insert(sidecar_id);
+            }
+        }
+        if self.missing_ids.len() <= SIDECAR_REORDER_THRESHOLD {
+            self.num_reordered = self.missing_ids.len();
+            self.missing_ids.clear();
+            self.missing_indexes.clear();
         }
     }
 }
@@ -626,6 +662,7 @@ impl Recovery {
         Ok(())
     }
 
+    #[cfg(feature= "power_sum")]
     pub fn on_quack_received(
         &mut self, quack: PowerSumQuack<u32>, from: SocketAddr,
     ) -> Result<(usize, usize)> {
@@ -778,6 +815,60 @@ impl Recovery {
             self.quack.remove(self.log[index]);
         }
         self.log.drain(..(self.next_log_index - decoded.num_reordered));
+        self.next_log_index = decoded.num_reordered;
+
+        Ok((lost_packets, lost_bytes))
+    }
+
+    #[cfg(feature = "strawman_a")]
+    pub fn on_quack_received(
+        &mut self, quack: StrawmanAQuack, from: SocketAddr,
+    ) -> Result<(usize, usize)> {
+        // Every quack is unique, process them all.
+        let now = Instant::now();
+        let epoch = packet::Epoch::Application;
+        let mut decoded = DecodedQuack::new(quack);
+        decoded.decode(&self.log, now);
+        if decoded.acked_ids.len() != 1 {
+            return Ok((0, 0));
+        }
+
+        // Detect and mark acked packets, without removing them from the sent
+        // packets list.
+        let (mut newly_acked, largest_newly_acked_sent_time) = if SIDECAR_MARK_ACKED {
+            self.sidecar_mark_acked_packets(decoded.acked_ids, now, epoch)
+        } else {
+            (Vec::new(), now)
+        };
+        if SIDECAR_MARK_ACKED && newly_acked.is_empty() {
+            return Ok((0, 0));
+        }
+
+        if !newly_acked.is_empty() {
+            let latest_rtt =
+                now.saturating_duration_since(largest_newly_acked_sent_time);
+            self.update_rtt(latest_rtt, Duration::ZERO, now);
+        }
+
+        // Detect and mark lost packets, without removing them from the sent
+        // packets list.
+        let (lost_bytes, lost_packets, largest_lost_pkt) = if SIDECAR_MARK_LOST_AND_RETX {
+            self.sidecar_mark_lost_packets(decoded.missing_ids, now, epoch)
+        } else {
+            (0, 0, None)
+        };
+
+        // Update the congestion window. Notably, we do not drain packets.
+        if SIDECAR_UPDATE_CWND {
+            self.sidecar_on_packets_lost(
+                now, epoch, lost_bytes, largest_lost_pkt);
+            self.sidecar_on_packets_acked(
+                now, epoch, &mut newly_acked);
+        }
+
+        // Everything we drain from the log has already been determined to
+        // be quacked or lost.
+        self.log.drain(..(decoded.missing_indexes.len() + 1));
         self.next_log_index = decoded.num_reordered;
 
         Ok((lost_packets, lost_bytes))
