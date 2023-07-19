@@ -104,6 +104,8 @@ use bincode;
 use quack::PowerSumQuack;
 #[cfg(feature = "strawman_a")]
 use quack::StrawmanAQuack;
+#[cfg(feature = "strawman_b")]
+use quack::StrawmanBQuack;
 
 #[no_mangle]
 pub extern fn quiche_version() -> *const u8 {
@@ -753,6 +755,8 @@ pub extern fn quiche_conn_recv_quack(
     let quack: PowerSumQuack<u32> = bincode::deserialize(&buf).unwrap();
     #[cfg(feature = "strawman_a")]
     let quack: StrawmanAQuack = bincode::deserialize(&buf).unwrap();
+    #[cfg(feature = "strawman_b")]
+    let quack: StrawmanBQuack = bincode::deserialize(&buf).unwrap();
     let conn: &mut Connection = unsafe { &mut *conn };
     let from = std_addr_from_c(addr, addr_len);
     conn.recv_quack(quack, from).unwrap();

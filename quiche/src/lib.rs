@@ -2105,6 +2105,25 @@ impl Connection {
     }
 
     /// Process quACKs received from a sidecar.
+    #[cfg(feature = "strawman_b")]
+    pub fn recv_quack(
+        &mut self,
+        quack: StrawmanBQuack,
+        from: SocketAddr,
+    ) -> Result<()> {
+        if self.paths.len() != 1 {
+            return Err(Error::SidecarMultiplePaths);
+        }
+        let path = self.paths.get_active_mut()?;
+        let (lost_packets, lost_bytes) =
+            path.recovery.on_quack_received(quack, from)?;
+        self.lost_count += lost_packets;
+        self.lost_bytes += lost_bytes as u64;
+        self.update_tx_cap();
+        Ok(())
+    }
+
+    /// Process quACKs received from a sidecar.
     #[cfg(feature = "strawman_a")]
     pub fn recv_quack(
         &mut self,

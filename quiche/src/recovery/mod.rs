@@ -54,6 +54,8 @@ use quack::{
 };
 #[cfg(feature = "strawman_a")]
 use quack::StrawmanAQuack;
+#[cfg(feature = "strawman_b")]
+use quack::StrawmanBQuack;
 use smallvec::SmallVec;
 
 // // For the e2e loss detection timeout it's RRT * packet thresh
@@ -117,6 +119,8 @@ pub struct DecodedQuack {
     pub quack: PowerSumQuack<u32>,
     #[cfg(feature = "strawman_a")]
     pub quack: StrawmanAQuack,
+    #[cfg(feature = "strawman_b")]
+    pub quack: StrawmanBQuack,
     // In increasing order.
     pub missing_indexes: Vec<usize>,
     pub missing_ids: HashSet<u32>,
@@ -138,6 +142,17 @@ impl DecodedQuack {
 
     #[cfg(feature = "strawman_a")]
     pub fn new(quack: StrawmanAQuack) -> Self {
+        DecodedQuack {
+            quack,
+            missing_indexes: Vec::new(),
+            missing_ids: HashSet::new(),
+            acked_ids: HashSet::new(),
+            num_reordered: 0,
+        }
+    }
+
+    #[cfg(feature = "strawman_b")]
+    pub fn new(quack: StrawmanBQuack) -> Self {
         DecodedQuack {
             quack,
             missing_indexes: Vec::new(),
@@ -219,10 +234,32 @@ impl DecodedQuack {
                 self.missing_ids.insert(sidecar_id);
             }
         }
-        if self.missing_ids.len() <= SIDECAR_REORDER_THRESHOLD {
-            self.num_reordered = self.missing_ids.len();
-            self.missing_ids.clear();
-            self.missing_indexes.clear();
+        self.num_reordered = std::cmp::min(SIDECAR_REORDER_THRESHOLD, self.missing_indexes.len());
+        for _ in 0..self.num_reordered {
+            let index = self.missing_indexes.pop().unwrap();
+            self.missing_ids.remove(&log[index]);
+        }
+    }
+
+    #[cfg(feature = "strawman_b")]
+    pub fn decode(&mut self, log: &[u32], now: Instant) {
+        let last_value = *self.quack.window.back().unwrap();
+        let acked_ids = self.quack.window.iter().collect::<HashSet<_>>();
+        for (i, &sidecar_id) in log.iter().enumerate() {
+            if acked_ids.contains(&sidecar_id) {
+                self.acked_ids.insert(sidecar_id);
+                if sidecar_id == last_value {
+                    break;
+                }
+            } else {
+                self.missing_indexes.push(i);
+                self.missing_ids.insert(sidecar_id);
+            }
+        }
+        self.num_reordered = std::cmp::min(SIDECAR_REORDER_THRESHOLD, self.missing_indexes.len());
+        for i in 0..self.num_reordered {
+            let index = self.missing_indexes.pop().unwrap();
+            self.missing_ids.remove(&log[index]);
         }
     }
 }
@@ -828,13 +865,30 @@ impl Recovery {
 
     #[cfg(feature = "strawman_a")]
     pub fn on_quack_received(
-        &mut self, quack: StrawmanAQuack, from: SocketAddr,
+        &mut self, quack: StrawmanAQuack, _from: SocketAddr,
+    ) -> Result<(usize, usize)> {
+        let now = Instant::now();
+        let mut decoded = DecodedQuack::new(quack);
+        decoded.decode(&mut self.log, now);
+        self.on_quack_received_strawman(decoded, now)
+    }
+
+    #[cfg(feature = "strawman_b")]
+    pub fn on_quack_received(
+        &mut self, quack: StrawmanBQuack, _from: SocketAddr,
+    ) -> Result<(usize, usize)> {
+        let now = Instant::now();
+        let mut decoded = DecodedQuack::new(quack);
+        decoded.decode(&mut self.log, now);
+        self.on_quack_received_strawman(decoded, now)
+    }
+
+    #[cfg(not(feature = "power_sum"))]
+    fn on_quack_received_strawman(
+        &mut self, decoded: DecodedQuack, now: Instant,
     ) -> Result<(usize, usize)> {
         // Every quack is unique, process them all.
-        let now = Instant::now();
         let epoch = packet::Epoch::Application;
-        let mut decoded = DecodedQuack::new(quack);
-        decoded.decode(&self.log, now);
         if decoded.acked_ids.len() != 1 {
             return Ok((0, 0));
         }
