@@ -91,14 +91,20 @@ pub(super) const MAX_OUTSTANDING_NON_ACK_ELICITING: usize = 24;
 
 // Sidecar features
 
-// // Client-side retransmission
-// const DEFAULT_NEAR_SUBPATH_RATIO: f64 = 2.0 / 152.0;
-// const SIDECAR_MARK_ACKED: bool = false;
-// const SIDECAR_RESET_THRESHOLD: Duration = Duration::from_millis(10);
+// Client-side retransmission
+#[cfg(not(feature = "ack_reduction"))]
+const DEFAULT_NEAR_SUBPATH_RATIO: f64 = 2.0 / 152.0;
+#[cfg(not(feature = "ack_reduction"))]
+const SIDECAR_MARK_ACKED: bool = false;
+#[cfg(not(feature = "ack_reduction"))]
+const SIDECAR_RESET_THRESHOLD: Duration = Duration::from_millis(10);
 
 // ACK reduction
+#[cfg(feature = "ack_reduction")]
 const DEFAULT_NEAR_SUBPATH_RATIO: f64 = 40.0 / 41.0;
+#[cfg(feature = "ack_reduction")]
 const SIDECAR_MARK_ACKED: bool = true;
+#[cfg(feature = "ack_reduction")]
 const SIDECAR_RESET_THRESHOLD: Duration = Duration::from_millis(300);
 
 const SIDECAR_MARK_LOST_AND_RETX: bool = true;

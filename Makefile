@@ -54,6 +54,10 @@ clean:
 		$(DOCKER) rmi -f $$id; \
 	done
 
+.PHONY: strawman_a
+strawman_a:
+	cargo build --package quiche --release --features ffi,pkg-config-meta,qlog,strawman_a
+
 .PHONY: sidecar
 sidecar:
 	cargo build --package quiche --release --features ffi,pkg-config-meta,qlog,power_sum
