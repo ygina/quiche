@@ -720,6 +720,18 @@ impl Recovery {
         // Add up to the last packet received to the sender's quack.
         while self.next_log_index < self.log.len() {
             let sidecar_id = self.log[self.next_log_index];
+            // If we send A,B,C, but with reordering the last values received
+            // are C,B,A we need to check if the last received value was
+            // previously reordered. Previously, we would insert everything
+            // in the log which could have caused us to eventually exceed the
+            // threshold.
+            //
+            // If we get a quack whose last value is A, but the client has
+            // received C,B,A, we also run into problems. We'd currently be
+            // unable to decode the quack (because we only insert up to C),
+            // and then reset. What we could do instead is insert threshold more
+            // packets every time, do it only we can't decode, etc. But maybe
+            // not worth it and easier to just reset.
             self.next_log_index += 1;
             self.quack.insert(sidecar_id);
             if sidecar_id == quack.last_value() {
