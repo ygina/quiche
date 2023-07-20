@@ -224,10 +224,13 @@ impl DecodedQuack {
     }
 
     #[cfg(feature = "strawman_a")]
-    pub fn decode(&mut self, log: &[u32], now: Instant) {
+    /// Returns the index to drain up to from the log.
+    pub fn decode(&mut self, log: &[u32], now: Instant) -> usize {
+        let mut max_ack_index = log.len();
         for (i, &sidecar_id) in log.iter().enumerate() {
             if sidecar_id == self.quack.sidecar_id {
                 self.acked_ids.insert(sidecar_id);
+                max_ack_index = i;
                 break;
             } else {
                 self.missing_indexes.push(i);
@@ -239,16 +242,23 @@ impl DecodedQuack {
             let index = self.missing_indexes.pop().unwrap();
             self.missing_ids.remove(&log[index]);
         }
+        if self.num_reordered == 0 {
+            max_ack_index + 1
+        } else {
+            max_ack_index - self.num_reordered
+        }
     }
 
     #[cfg(feature = "strawman_b")]
-    pub fn decode(&mut self, log: &[u32], now: Instant) {
+    pub fn decode(&mut self, log: &[u32], now: Instant) -> usize {
         let last_value = *self.quack.window.back().unwrap();
+        let mut max_ack_index = log.len();
         let acked_ids = self.quack.window.iter().collect::<HashSet<_>>();
         for (i, &sidecar_id) in log.iter().enumerate() {
             if acked_ids.contains(&sidecar_id) {
                 self.acked_ids.insert(sidecar_id);
                 if sidecar_id == last_value {
+                    max_ack_index = i;
                     break;
                 }
             } else {
@@ -256,10 +266,26 @@ impl DecodedQuack {
                 self.missing_ids.insert(sidecar_id);
             }
         }
-        self.num_reordered = std::cmp::min(SIDECAR_REORDER_THRESHOLD, self.missing_indexes.len());
-        for i in 0..self.num_reordered {
-            let index = self.missing_indexes.pop().unwrap();
-            self.missing_ids.remove(&log[index]);
+
+        let min_reorder_index = if max_ack_index > SIDECAR_REORDER_THRESHOLD {
+            max_ack_index - SIDECAR_REORDER_THRESHOLD
+        } else {
+            0
+        };
+        while let Some(&missing_index) = self.missing_indexes.last() {
+            if missing_index >= min_reorder_index {
+                self.missing_ids.remove(&log[missing_index]);
+                self.missing_indexes.pop();
+                self.num_reordered = max_ack_index - missing_index;
+            } else {
+                break;
+            }
+        }
+
+        if self.num_reordered == 0 {
+            max_ack_index + 1
+        } else {
+            max_ack_index - self.num_reordered
         }
     }
 }
@@ -881,8 +907,11 @@ impl Recovery {
     ) -> Result<(usize, usize)> {
         let now = Instant::now();
         let mut decoded = DecodedQuack::new(quack);
-        decoded.decode(&mut self.log, now);
-        self.on_quack_received_strawman(decoded, now)
+        if decoded.acked_ids.len() != 1 {
+            return Ok((0, 0));
+        }
+        let drain_index = decoded.decode(&mut self.log, now);
+        self.on_quack_received_strawman(decoded, now, drain_index)
     }
 
     #[cfg(feature = "strawman_b")]
@@ -891,19 +920,16 @@ impl Recovery {
     ) -> Result<(usize, usize)> {
         let now = Instant::now();
         let mut decoded = DecodedQuack::new(quack);
-        decoded.decode(&mut self.log, now);
-        self.on_quack_received_strawman(decoded, now)
+        let drain_index = decoded.decode(&mut self.log, now);
+        self.on_quack_received_strawman(decoded, now, drain_index)
     }
 
     #[cfg(not(feature = "power_sum"))]
     fn on_quack_received_strawman(
-        &mut self, decoded: DecodedQuack, now: Instant,
+        &mut self, decoded: DecodedQuack, now: Instant, drain_index: usize,
     ) -> Result<(usize, usize)> {
         // Every quack is unique, process them all.
         let epoch = packet::Epoch::Application;
-        if decoded.acked_ids.len() != 1 {
-            return Ok((0, 0));
-        }
 
         // Detect and mark acked packets, without removing them from the sent
         // packets list.
@@ -940,8 +966,7 @@ impl Recovery {
 
         // Everything we drain from the log has already been determined to
         // be quacked or lost.
-        self.log.drain(..(decoded.missing_indexes.len() + 1));
-        self.next_log_index = decoded.num_reordered;
+        self.log.drain(..drain_index);
 
         Ok((lost_packets, lost_bytes))
     }
