@@ -211,7 +211,7 @@ impl DecodedQuack {
             if missing_index >= min_reorder_index {
                 self.missing_ids.remove(&log[missing_index]);
                 self.missing_indexes.pop();
-                self.num_reordered = log.len() - missing_index;
+                self.num_reordered = log.len() - missing_index - 1;
             } else {
                 break;
             }
@@ -225,7 +225,7 @@ impl DecodedQuack {
         if self.num_reordered == 0 {
             log.len()
         } else {
-            log.len() - self.num_reordered
+            log.len() - self.num_reordered - 1
         }
     }
 
@@ -902,7 +902,11 @@ impl Recovery {
             self.quack.remove(self.log[index]);
         }
         self.log.drain(..drain_index);
-        self.next_log_index = decoded.num_reordered;
+        self.next_log_index = if decoded.num_reordered == 0 {
+            0
+        } else {
+            decoded.num_reordered + 1
+        };
 
         Ok((lost_packets, lost_bytes))
     }
