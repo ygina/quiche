@@ -169,11 +169,11 @@ impl DecodedQuack {
     /// TCP's reordering threshold by not considering an index missing if there
     /// is a small number of received packets after that one before the suffix.
     #[cfg(feature = "power_sum")]
-    pub fn decode(&mut self, log: &[u32], now: Instant) {
+    pub fn decode(&mut self, log: &[u32], now: Instant) -> usize {
         // We'd be calling this if there are missing packets in the suffix.
         if self.quack.count() == 0 {
             self.acked_ids = log.iter().map(|&id| id).collect();
-            return;
+            return log.len();
         }
 
         let coeffs = self.quack.to_coeffs();
@@ -220,6 +220,12 @@ impl DecodedQuack {
         #[cfg(feature = "quack_log")]
         for id in &self.missing_ids {
             println!("quack_log {:?} {} (sidecar_detect_lost_packets)", now, id);
+        }
+
+        if self.num_reordered == 0 {
+            log.len()
+        } else {
+            log.len() - self.num_reordered
         }
     }
 
@@ -842,7 +848,7 @@ impl Recovery {
 
         // Find the missing packets that are not in the suffix.
         let mut decoded = DecodedQuack::new(self.quack.clone() - quack);
-        decoded.decode(&self.log[..self.next_log_index], now);
+        let drain_index = decoded.decode(&self.log[..self.next_log_index], now);
 
         #[cfg(feature = "debug")]
         if self.quack_epoch > 0 {
@@ -895,7 +901,7 @@ impl Recovery {
         for index in decoded.missing_indexes {
             self.quack.remove(self.log[index]);
         }
-        self.log.drain(..(self.next_log_index - decoded.num_reordered));
+        self.log.drain(..drain_index);
         self.next_log_index = decoded.num_reordered;
 
         Ok((lost_packets, lost_bytes))
