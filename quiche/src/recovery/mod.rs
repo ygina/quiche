@@ -917,10 +917,9 @@ impl Recovery {
     ) -> Result<(usize, usize)> {
         let now = Instant::now();
         let mut decoded = DecodedQuack::new(quack);
-        if decoded.acked_ids.len() != 1 {
-            return Ok((0, 0));
-        }
         let drain_index = decoded.decode(&mut self.log, now);
+        #[cfg(feature = "debug")]
+        println!("acked {:?} missing {:?} num_reordered {} drain {} {:?}", decoded.acked_ids, decoded.missing_ids, decoded.num_reordered, drain_index, &self.log[..(decoded.missing_ids.len() + decoded.acked_ids.len() + decoded.num_reordered)]);
         self.on_quack_received_strawman(decoded, now, drain_index)
     }
 
@@ -931,6 +930,8 @@ impl Recovery {
         let now = Instant::now();
         let mut decoded = DecodedQuack::new(quack);
         let drain_index = decoded.decode(&mut self.log, now);
+        #[cfg(feature = "debug")]
+        println!("acked {:?} missing {:?} num_reordered {} drain {} {:?}", decoded.acked_ids, decoded.missing_ids, decoded.num_reordered, drain_index, &self.log[..(decoded.missing_ids.len() + decoded.acked_ids.len() + decoded.num_reordered)]);
         self.on_quack_received_strawman(decoded, now, drain_index)
     }
 
