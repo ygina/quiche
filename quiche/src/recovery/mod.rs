@@ -243,16 +243,17 @@ impl DecodedQuack {
                 self.missing_ids.insert(sidecar_id);
             }
         }
-        self.num_reordered = std::cmp::min(SIDECAR_REORDER_THRESHOLD, self.missing_indexes.len());
-        for _ in 0..self.num_reordered {
-            let index = self.missing_indexes.pop().unwrap();
-            self.missing_ids.remove(&log[index]);
-        }
-        if self.num_reordered == 0 {
-            max_ack_index + 1
-        } else {
-            max_ack_index - self.num_reordered
-        }
+        // self.num_reordered = std::cmp::min(SIDECAR_REORDER_THRESHOLD, self.missing_indexes.len());
+        // for _ in 0..self.num_reordered {
+        //     let index = self.missing_indexes.pop().unwrap();
+        //     self.missing_ids.remove(&log[index]);
+        // }
+        // if self.num_reordered == 0 {
+        //     max_ack_index + 1
+        // } else {
+        //     max_ack_index - self.num_reordered
+        // }
+        max_ack_index + 1
     }
 
     #[cfg(feature = "strawman_b")]
@@ -950,6 +951,7 @@ impl Recovery {
             (Vec::new(), now)
         };
         if SIDECAR_MARK_ACKED && newly_acked.is_empty() {
+            self.log.drain(..drain_index);
             return Ok((0, 0));
         }
 
