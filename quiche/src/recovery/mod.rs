@@ -109,6 +109,7 @@ const SIDECAR_MARK_ACKED: bool = true;
 #[cfg(feature = "ack_reduction")]
 const SIDECAR_RESET_THRESHOLD: Duration = Duration::from_millis(300);
 
+const SIDECAR_RESET_PORT: u16 = 1234;
 const SIDECAR_MARK_LOST_AND_RETX: bool = true;
 const SIDECAR_UPDATE_CWND: bool = true;
 const SIDECAR_REORDER_THRESHOLD: usize = 3;
@@ -703,7 +704,9 @@ impl Recovery {
         self.pacer.send(sent_bytes, now);
     }
 
-    fn send_quack_reset(&mut self, addr: SocketAddr, now: Instant) -> Result<()> {
+    fn send_quack_reset(
+        &mut self, mut addr: SocketAddr, now: Instant,
+    ) -> Result<()> {
         if !self.quack_reset {
             return Ok(());
         }
@@ -725,6 +728,7 @@ impl Recovery {
             self.quack_epoch += 1;
             let sock = UdpSocket::bind("0.0.0.0:0")
                 .map_err(|_| crate::Error::BadQuackResetSocket)?;
+            addr.set_port(SIDECAR_RESET_PORT);
             sock.send_to(&[self.quack_epoch], addr)
                 .map_err(|_| crate::Error::BadQuackResetSocket)?;
 
