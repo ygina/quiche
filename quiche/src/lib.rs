@@ -451,7 +451,7 @@ const MAX_ACK_RANGES: usize = 68;
 const MAX_STREAM_ID: u64 = 1 << 60;
 
 // The default max_datagram_size used in congestion control.
-const MAX_SEND_UDP_PAYLOAD_SIZE: usize = 1460;
+const MAX_SEND_UDP_PAYLOAD_SIZE: usize = 1200;
 
 // The default length of DATAGRAM queues.
 const DEFAULT_MAX_DGRAM_QUEUE_LEN: usize = 0;
@@ -982,7 +982,7 @@ impl Config {
 
     /// Sets the maximum outgoing UDP payload size.
     ///
-    /// The default and minimum value is `1460`.
+    /// The default and minimum value is `1200`.
     pub fn set_max_send_udp_payload_size(&mut self, v: usize) {
         self.max_send_udp_payload_size = cmp::max(v, MAX_SEND_UDP_PAYLOAD_SIZE);
     }
