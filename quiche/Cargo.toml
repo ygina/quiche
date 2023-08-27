@@ -28,7 +28,7 @@ include = [
 ]
 
 [features]
-default = ["boringssl-vendored"]
+default = ["boringssl-vendored", "power_sum"]
 
 # Build the vendored BoringSSL library.
 boringssl-vendored = []
