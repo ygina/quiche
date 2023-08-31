@@ -139,6 +139,16 @@ typedef struct quiche_config quiche_config;
 // Creates a config object with the given version.
 quiche_config *quiche_config_new(uint32_t version);
 
+enum quiche_quack_style {
+    QUICHE_QUACK_POWER_SUM = 0,
+    QUICHE_QUACK_STRAWMAN_A = 1,
+    QUICHE_QUACK_STRAWMAN_B = 2,
+    QUICHE_QUACK_STRAWMAN_C = 2,
+};
+
+// Set the style of quack to send and receive.
+void quiche_config_set_quack_style(quiche_config *config, enum quiche_quack_style style);
+
 // Configures the given certificate chain.
 int quiche_config_load_cert_chain_from_pem_file(quiche_config *config,
                                                 const char *path);
@@ -206,6 +216,9 @@ void quiche_config_set_ack_delay_exponent(quiche_config *config, uint64_t v);
 // Sets the `max_ack_delay` transport parameter.
 void quiche_config_set_max_ack_delay(quiche_config *config, uint64_t v);
 
+// Sets the `min_ack_delay` transport parameter.
+void quiche_config_set_min_ack_delay(quiche_config *config, uint64_t v);
+
 // Sets the `disable_active_migration` transport parameter.
 void quiche_config_set_disable_active_migration(quiche_config *config, bool v);
 
@@ -223,6 +236,15 @@ enum quiche_cc_algorithm {
 
 // Sets the congestion control algorithm used.
 void quiche_config_set_cc_algorithm(quiche_config *config, enum quiche_cc_algorithm algo);
+
+// Sets the sidecar quACK threshold.
+void quiche_config_set_sidecar_threshold(quiche_config *config, size_t threshold);
+
+// Configures whether to send quACK reset messages.
+void quiche_config_enable_quack_reset(quiche_config *config, bool v);
+
+// Configures whether to send packets only if cwnd > mtu.
+void quiche_config_enable_sidecar_mtu(quiche_config *config, bool v);
 
 // Configures whether to use HyStart++.
 void quiche_config_enable_hystart(quiche_config *config, bool v);
@@ -326,6 +348,11 @@ typedef struct {
     struct sockaddr *to;
     socklen_t to_len;
 } quiche_recv_info;
+
+// Processes quACKs received from a sidecar.
+void quiche_conn_recv_quack(quiche_conn *conn,
+                            uint8_t *quack_buf, size_t quack_buf_len,
+                            const struct sockaddr *addr, size_t addr_len);
 
 // Processes QUIC packets received from the peer.
 ssize_t quiche_conn_recv(quiche_conn *conn, uint8_t *buf, size_t buf_len,

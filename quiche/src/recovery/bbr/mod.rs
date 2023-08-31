@@ -256,6 +256,8 @@ fn bbr_enter_recovery(r: &mut Recovery, now: Instant) {
     r.bbr_state.prior_cwnd = per_ack::bbr_save_cwnd(r);
 
     r.congestion_window = r.bytes_in_flight.max(r.max_datagram_size);
+    #[cfg(feature = "cwnd_log")]
+    println!("cwnd {} {:?} (bbr::bbr_enter_recovery)", r.cwnd(), std::time::Instant::now());
     r.congestion_recovery_start_time = Some(now);
 
     r.bbr_state.packet_conservation = true;
@@ -324,7 +326,7 @@ fn on_packets_acked(
 
 fn congestion_event(
     r: &mut Recovery, lost_bytes: usize, time_sent: Instant,
-    _epoch: packet::Epoch, now: Instant,
+    _epoch: packet::Epoch, now: Instant, _metadata: Option<QuackMetadata>,
 ) {
     r.bbr_state.newly_lost_bytes = lost_bytes;
 

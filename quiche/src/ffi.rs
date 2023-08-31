@@ -100,6 +100,13 @@ use winapi::shared::ws2ipdef::SOCKADDR_IN6_LH_u;
 
 use crate::*;
 
+use bincode;
+use quack::PowerSumQuack;
+#[cfg(feature = "strawman_a")]
+use quack::StrawmanAQuack;
+#[cfg(feature = "strawman_b")]
+use quack::StrawmanBQuack;
+
 #[no_mangle]
 pub extern fn quiche_version() -> *const u8 {
     static VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "\0");
@@ -147,6 +154,13 @@ pub extern fn quiche_config_new(version: u32) -> *mut Config {
 
         Err(_) => ptr::null_mut(),
     }
+}
+
+#[no_mangle]
+pub extern fn quiche_config_set_quack_style(
+    config: &mut Config, style: QuackStyle,
+) {
+    config.set_quack_style(style);
 }
 
 #[no_mangle]
@@ -299,6 +313,11 @@ pub extern fn quiche_config_set_max_ack_delay(config: &mut Config, v: u64) {
 }
 
 #[no_mangle]
+pub extern fn quiche_config_set_min_ack_delay(config: &mut Config, v: u64) {
+    config.set_min_ack_delay(v);
+}
+
+#[no_mangle]
 pub extern fn quiche_config_set_disable_active_migration(
     config: &mut Config, v: bool,
 ) {
@@ -329,6 +348,23 @@ pub extern fn quiche_config_set_initial_congestion_window_packets(
     config: &mut Config, packets: size_t,
 ) {
     config.set_initial_congestion_window_packets(packets);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_set_sidecar_threshold(
+    config: &mut Config, threshold: size_t,
+) {
+    config.set_sidecar_threshold(threshold);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_enable_quack_reset(config: &mut Config, v: bool) {
+    config.enable_quack_reset(v);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_enable_sidecar_mtu(config: &mut Config, v: bool) {
+    config.enable_sidecar_mtu(v);
 }
 
 #[no_mangle]
@@ -711,6 +747,26 @@ impl<'a> From<&RecvInfo<'a>> for crate::RecvInfo {
             to: std_addr_from_c(info.to, info.to_len),
         }
     }
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_recv_quack(
+    conn: *mut Connection, quack_buf: *mut u8, quack_buf_len: size_t,
+    addr: &sockaddr, addr_len: socklen_t,
+) {
+    if conn.is_null() {
+        return;
+    }
+    let buf = unsafe { slice::from_raw_parts_mut(quack_buf, quack_buf_len) };
+    #[cfg(feature = "power_sum")]
+    let quack: PowerSumQuack<u32> = bincode::deserialize(&buf).unwrap();
+    #[cfg(feature = "strawman_a")]
+    let quack: StrawmanAQuack = bincode::deserialize(&buf).unwrap();
+    #[cfg(feature = "strawman_b")]
+    let quack: StrawmanBQuack = bincode::deserialize(&buf).unwrap();
+    let conn: &mut Connection = unsafe { &mut *conn };
+    let from = std_addr_from_c(addr, addr_len);
+    conn.recv_quack(quack, from).unwrap();
 }
 
 #[no_mangle]

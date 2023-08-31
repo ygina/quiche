@@ -45,6 +45,30 @@ fuzzing = []
 # Build and expose the FFI API.
 ffi = []
 
+# Log the bytes in flight when it is updated.
+bytes_in_flight_log = []
+
+# Log the congestion window when it is updated in cubic.
+cwnd_log = []
+
+# Log the sidecar identifier when it is inserted in a quACK.
+quack_log = []
+
+# Debug logging when quacks are received
+debug = []
+
+# Power sum quack
+power_sum = []
+
+# Echo identifier of every packet
+strawman_a = []
+
+# Echo sliding window of packet identifiers
+strawman_b = []
+
+# ACK reduction parameters instead of client-side retransmission.
+ack_reduction = []
+
 [package.metadata.docs.rs]
 no-default-features = true
 features = ["boringssl-boring-crate", "qlog"]
@@ -55,6 +79,9 @@ cmake = "0.1"
 
 [dependencies]
 either = { version = "1.8", default-features = false }
+bincode = "1.3.3"
+quack = { path = "../../quack" }
+sidecar = { path = "../../sidecar" }
 log = { version = "0.4", features = ["std"] }
 libc = "0.2"
 libm = "0.2"

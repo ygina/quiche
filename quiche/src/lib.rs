@@ -415,6 +415,8 @@ use std::str::FromStr;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 
+use quack::*;
+use sidecar::ID_OFFSET;
 use smallvec::SmallVec;
 
 /// The current QUIC wire version.
@@ -564,6 +566,12 @@ pub enum Error {
 
     /// Error in key update.
     KeyUpdate,
+
+    /// Sidecar is enabled while there are multiple paths.
+    SidecarMultiplePaths,
+
+    /// Failed to send a quACK reset message.
+    BadQuackResetSocket,
 }
 
 impl Error {
@@ -603,6 +611,8 @@ impl Error {
             Error::IdLimit => -17,
             Error::OutOfIdentifiers => -18,
             Error::KeyUpdate => -19,
+            Error::SidecarMultiplePaths => -20,
+            Error::BadQuackResetSocket => -21,
         }
     }
 }
@@ -724,6 +734,11 @@ pub struct Config {
     max_stream_window: u64,
 
     disable_dcid_reuse: bool,
+
+    sidecar_threshold: usize,
+    quack_reset: bool,
+    sidecar_mtu: bool,
+    quack_style: QuackStyle,
 }
 
 // See https://quicwg.org/base-drafts/rfc9000.html#section-15
@@ -786,6 +801,11 @@ impl Config {
             max_stream_window: stream::MAX_STREAM_WINDOW,
 
             disable_dcid_reuse: false,
+
+            sidecar_threshold: 0,
+            quack_reset: true,
+            sidecar_mtu: false,
+            quack_style: QuackStyle::PowerSum,
         })
     }
 
@@ -1099,6 +1119,13 @@ impl Config {
         self.local_transport_params.max_ack_delay = v;
     }
 
+    /// Sets the `min_ack_delay` transport parameter.
+    ///
+    /// The default value is `0`.
+    pub fn set_min_ack_delay(&mut self, v: u64) {
+        self.local_transport_params.min_ack_delay = v;
+    }
+
     /// Sets the `active_connection_id_limit` transport parameter.
     ///
     /// The default value is `2`. Lower values will be ignored.
@@ -1145,6 +1172,32 @@ impl Config {
     /// The default value is `CongestionControlAlgorithm::CUBIC`.
     pub fn set_cc_algorithm(&mut self, algo: CongestionControlAlgorithm) {
         self.cc_algorithm = algo;
+    }
+
+    /// Sets the quack style used.
+    ///
+    /// The default value is `QuackStyle::PowerSum`.
+    pub fn set_quack_style(&mut self, style: QuackStyle) {
+        self.quack_style = style;
+    }
+
+    /// Sets the sidecar quACK threshold.
+    pub fn set_sidecar_threshold(&mut self, threshold: usize) {
+        self.sidecar_threshold = threshold;
+    }
+
+    /// Configures whether to send quACK reset messages.
+    ///
+    /// The default value is `true`.
+    pub fn enable_quack_reset(&mut self, v: bool) {
+        self.quack_reset = v;
+    }
+
+    /// Configures whether to send packets only if cwnd > mtu.
+    ///
+    /// The default value is `false`.
+    pub fn enable_sidecar_mtu(&mut self, v: bool) {
+        self.sidecar_mtu = v;
     }
 
     /// Configures whether to enable HyStart++.
@@ -1340,6 +1393,9 @@ pub struct Connection {
     /// Idle timeout expiration time.
     idle_timer: Option<time::Instant>,
 
+    /// Ack timeout expiration time for max ack delay.
+    ack_timer: Option<time::Instant>,
+
     /// Draining timeout expiration time.
     draining_timer: Option<time::Instant>,
 
@@ -1415,6 +1471,9 @@ pub struct Connection {
     /// Whether the connection should prevent from reusing destination
     /// Connection IDs when the peer migrates.
     disable_dcid_reuse: bool,
+
+    /// Send packets only if cwnd > mtu.
+    sidecar_mtu: bool,
 
     /// A resusable buffer used by Recovery
     newly_acked: Vec<recovery::Acked>,
@@ -1722,6 +1781,12 @@ impl Connection {
             reset_token,
         );
 
+        let ack_timer = if config.local_transport_params.max_ack_delay == 0 {
+            None
+        } else {
+            Some(time::Instant::now() + time::Duration::from_millis(config.local_transport_params.max_ack_delay))
+        };
+
         let mut conn = Connection {
             version: config.version,
 
@@ -1795,6 +1860,8 @@ impl Connection {
 
             idle_timer: None,
 
+            ack_timer,
+
             draining_timer: None,
 
             undecryptable_pkts: VecDeque::new(),
@@ -1849,6 +1916,8 @@ impl Connection {
             emit_dgram: true,
 
             disable_dcid_reuse: config.disable_dcid_reuse,
+
+            sidecar_mtu: config.sidecar_mtu,
 
             newly_acked: Vec::new(),
         };
@@ -2029,6 +2098,63 @@ impl Connection {
 
         self.process_peer_transport_params(peer_params)?;
 
+        Ok(())
+    }
+
+    /// Process quACKs received from a sidecar.
+    #[cfg(feature = "power_sum")]
+    pub fn recv_quack(
+        &mut self,
+        quack: PowerSumQuack<u32>,
+        from: SocketAddr,
+    ) -> Result<()> {
+        if self.paths.len() != 1 {
+            return Err(Error::SidecarMultiplePaths);
+        }
+        let path = self.paths.get_active_mut()?;
+        let (lost_packets, lost_bytes) =
+            path.recovery.on_quack_received(quack, from)?;
+        self.lost_count += lost_packets;
+        self.lost_bytes += lost_bytes as u64;
+        self.update_tx_cap();
+        Ok(())
+    }
+
+    /// Process quACKs received from a sidecar.
+    #[cfg(feature = "strawman_b")]
+    pub fn recv_quack(
+        &mut self,
+        quack: StrawmanBQuack,
+        from: SocketAddr,
+    ) -> Result<()> {
+        if self.paths.len() != 1 {
+            return Err(Error::SidecarMultiplePaths);
+        }
+        let path = self.paths.get_active_mut()?;
+        let (lost_packets, lost_bytes) =
+            path.recovery.on_quack_received(quack, from)?;
+        self.lost_count += lost_packets;
+        self.lost_bytes += lost_bytes as u64;
+        self.update_tx_cap();
+        Ok(())
+    }
+
+    /// Process quACKs received from a sidecar.
+    #[cfg(feature = "strawman_a")]
+    pub fn recv_quack(
+        &mut self,
+        quack: StrawmanAQuack,
+        from: SocketAddr,
+    ) -> Result<()> {
+        if self.paths.len() != 1 {
+            return Err(Error::SidecarMultiplePaths);
+        }
+        let path = self.paths.get_active_mut()?;
+        let (lost_packets, lost_bytes) =
+            path.recovery.on_quack_received(quack, from)?;
+        self.lost_count += lost_packets;
+        self.lost_bytes += lost_bytes as u64;
+        self.update_tx_cap();
         Ok(())
     }
 
@@ -3214,6 +3340,12 @@ impl Connection {
             {
                 break;
             }
+
+            // Sidecar: Don't coalesce packets at all. The only packets that
+            // were being coalesced were the first two Initial packets anyway.
+            // Payload packets can't be coalesced because they have short
+            // headers and thus no Length field.
+            break;
         }
 
         if done == 0 {
@@ -3496,6 +3628,12 @@ impl Connection {
 
         let left_before_packing_ack_frame = left;
 
+        let ack_timer_expired = if let Some(ack_timer) = self.ack_timer {
+            now > ack_timer
+        } else {
+            false
+        };
+
         // Create ACK frame.
         //
         // When we need to explicitly elicit an ACK via PING later, go ahead and
@@ -3503,7 +3641,7 @@ impl Connection {
         // send a packet with PING anyways, even if we haven't received anything
         // ACK eliciting.
         if pkt_space.recv_pkt_need_ack.len() > 0 &&
-            (pkt_space.ack_elicited || ack_elicit_required) &&
+            (pkt_space.ack_elicited || ack_elicit_required || ack_timer_expired) &&
             (!is_closing ||
                 (pkt_type == Type::Handshake &&
                     self.local_error
@@ -3511,38 +3649,56 @@ impl Connection {
                         .map_or(false, |le| le.is_app))) &&
             path.active()
         {
-            let ack_delay = pkt_space.largest_rx_pkt_time.elapsed();
+            let ack_delay = now - cmp::min(
+                pkt_space.largest_rx_pkt_time,
+                pkt_space.last_ack_time,
+            );
 
-            let ack_delay = ack_delay.as_micros() as u64 /
-                2_u64
-                    .pow(self.local_transport_params.ack_delay_exponent as u32);
+            // Only send the ACK if the min_ack_delay has elapsed or if we
+            // are not in the Application epoch to allow the cryptographic
+            // handshake to complete
+            if epoch != packet::Epoch::Application || ack_delay.as_millis() as u64 >= self.local_transport_params.min_ack_delay {
+                pkt_space.last_ack_time = now;
+                let ranges = pkt_space.recv_pkt_need_ack.clone();
 
-            let frame = frame::Frame::ACK {
-                ack_delay,
-                ranges: pkt_space.recv_pkt_need_ack.clone(),
-                ecn_counts: None, // sending ECN is not supported at this time
-            };
+                let ack_delay = ack_delay.as_micros() as u64 /
+                    2_u64
+                        .pow(self.local_transport_params.ack_delay_exponent as u32);
+                let frame = frame::Frame::ACK {
+                    ack_delay,
+                    ranges,
+                    ecn_counts: None, // sending ECN is not supported at this time
+                };
 
-            // When a PING frame needs to be sent, avoid sending the ACK if
-            // there is not enough cwnd available for both (note that PING
-            // frames are always 1 byte, so we just need to check that the
-            // ACK's length is lower than cwnd).
-            if pkt_space.ack_elicited || frame.wire_len() < cwnd_available {
-                // ACK-only packets are not congestion controlled so ACKs must
-                // be bundled considering the buffer capacity only, and not the
-                // available cwnd.
-                if push_frame_to_pkt!(b, frames, frame, left) {
-                    pkt_space.ack_elicited = false;
+                // When a PING frame needs to be sent, avoid sending the ACK if
+                // there is not enough cwnd available for both (note that PING
+                // frames are always 1 byte, so we just need to check that the
+                // ACK's length is lower than cwnd).
+                if pkt_space.ack_elicited || frame.wire_len() < cwnd_available {
+                    // ACK-only packets are not congestion controlled so ACKs must
+                    // be bundled considering the buffer capacity only, and not the
+                    // available cwnd.
+                    if push_frame_to_pkt!(b, frames, frame, left) {
+                        pkt_space.ack_elicited = false;
+                    }
+
+                    if self.local_transport_params.max_ack_delay != 0 {
+                        self.ack_timer = Some(now + time::Duration::from_millis(self.local_transport_params.max_ack_delay));
+                    }
                 }
             }
         }
 
         // Limit output packet size by congestion window size.
-        left = cmp::min(
-            left,
-            // Bytes consumed by ACK frames.
-            cwnd_available.saturating_sub(left_before_packing_ack_frame - left),
-        );
+        let cwnd_available = cwnd_available
+            .saturating_sub(left_before_packing_ack_frame - left); /* bytes consumed by ACK frames */
+        if self.sidecar_mtu {
+            if cwnd_available < left {
+                left = 0;
+            }
+        } else {
+            left = cmp::min(left, cwnd_available);
+        }
 
         let mut challenge_data = None;
 
@@ -4257,10 +4413,23 @@ impl Connection {
             aead,
         )?;
 
+        // The sidecar identifier is the first 4 bytes = 32 bits of the
+        // encrypted QUIC payload following the short header.
+        let ip_hdr_len = 42;
+        let base_index = ID_OFFSET - ip_hdr_len;
+        let sidecar_id = u32::from_be_bytes([
+            out[base_index],
+            out[base_index+1],
+            out[base_index+2],
+            out[base_index+3],
+        ]);
+
         let sent_pkt = recovery::Sent {
+            sidecar_id,
             pkt_num: pn,
             frames,
             time_sent: now,
+            time_acked_sidecar: None,
             time_acked: None,
             time_lost: None,
             size: if ack_eliciting { written } else { 0 },
@@ -5483,7 +5652,7 @@ impl Connection {
                 .as_ref()
                 .map(|key_update| key_update.timer);
 
-            let timers = [self.idle_timer, path_timer, key_update_timer];
+            let timers = [self.idle_timer, self.ack_timer, path_timer, key_update_timer];
 
             timers.iter().filter_map(|&x| x).min()
         }
@@ -7630,6 +7799,7 @@ struct TransportParams {
     pub initial_max_streams_uni: u64,
     pub ack_delay_exponent: u64,
     pub max_ack_delay: u64,
+    pub min_ack_delay: u64,
     pub disable_active_migration: bool,
     // pub preferred_address: ...,
     pub active_conn_id_limit: u64,
@@ -7653,6 +7823,7 @@ impl Default for TransportParams {
             initial_max_streams_uni: 0,
             ack_delay_exponent: 3,
             max_ack_delay: 25,
+            min_ack_delay: 0,
             disable_active_migration: false,
             active_conn_id_limit: 2,
             initial_source_connection_id: None,
@@ -16019,6 +16190,7 @@ pub use crate::path::PathStats;
 pub use crate::path::SocketAddrIter;
 
 pub use crate::recovery::CongestionControlAlgorithm;
+pub use crate::recovery::QuackStyle;
 
 pub use crate::stream::StreamIter;
 
