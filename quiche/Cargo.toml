@@ -78,7 +78,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 cmake = "0.1"
 
 [dependencies]
-either = { version = "1.8", default-features = false }
+either = { version = "1.5.2", default-features = false }
 bincode = "1.3.3"
 quack = { path = "../../quack" }
 sidecar = { path = "../../sidecar" }
