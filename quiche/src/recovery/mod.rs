@@ -49,8 +49,8 @@ use crate::ranges;
 use qlog::events::EventData;
 
 use quack::{
-    Quack, PowerSumQuack,
-    arithmetic::{MonicPolynomialEvaluator, ModularArithmetic},
+    PowerSumQuack, PowerSumQuackU32,
+    arithmetic::{self, ModularArithmetic},
 };
 #[cfg(feature = "strawman_a")]
 use quack::StrawmanAQuack;
@@ -114,7 +114,7 @@ const SIDECAR_REORDER_THRESHOLD: usize = 3;
 #[derive(Debug)]
 pub struct DecodedQuack {
     #[cfg(feature = "power_sum")]
-    pub quack: PowerSumQuack<u32>,
+    pub quack: PowerSumQuackU32,
     #[cfg(feature = "strawman_a")]
     pub quack: StrawmanAQuack,
     #[cfg(feature = "strawman_b")]
@@ -128,7 +128,7 @@ pub struct DecodedQuack {
 
 impl DecodedQuack {
     #[cfg(feature = "power_sum")]
-    pub fn new(quack: PowerSumQuack<u32>) -> Self {
+    pub fn new(quack: PowerSumQuackU32) -> Self {
         DecodedQuack {
             quack,
             missing_indexes: Vec::new(),
@@ -176,7 +176,7 @@ impl DecodedQuack {
 
         let coeffs = self.quack.to_coeffs();
         for (index, &id) in log.iter().enumerate() {
-            if MonicPolynomialEvaluator::eval(&coeffs, id).is_zero() {
+            if arithmetic::eval(&coeffs, id).value() == 0 {
                 self.missing_indexes.push(index);
                 if self.missing_ids.insert(id) {
                     // It is not very likely that two packets have the same
@@ -395,7 +395,7 @@ pub struct Recovery {
 
     sidecar: bool,
     quack_reset: bool,
-    quack: PowerSumQuack<u32>,
+    quack: PowerSumQuackU32,
     last_decoded_quack_count: u32,
     last_quack_reset: Instant,
 
@@ -751,7 +751,7 @@ impl Recovery {
 
     #[cfg(feature= "power_sum")]
     pub fn on_quack_received(
-        &mut self, quack: PowerSumQuack<u32>, from: SocketAddr,
+        &mut self, quack: PowerSumQuackU32, from: SocketAddr,
     ) -> Result<(usize, usize)> {
         // Don't process the quack if it hasn't changed since the last one we
         // received. Or if no packets have been received.
@@ -778,7 +778,7 @@ impl Recovery {
             // not worth it and easier to just reset.
             self.next_log_index += 1;
             self.quack.insert(sidecar_id);
-            if sidecar_id == quack.last_value() {
+            if Some(sidecar_id) == quack.last_value() {
                 break;
             }
         }
@@ -859,7 +859,7 @@ impl Recovery {
         // }
 
         // Find the missing packets that are not in the suffix.
-        let mut decoded = DecodedQuack::new(self.quack.clone() - quack);
+        let mut decoded = DecodedQuack::new(self.quack.clone().sub(quack));
         let drain_index = decoded.decode(&self.log[..self.next_log_index], now);
 
         #[cfg(feature = "debug")]

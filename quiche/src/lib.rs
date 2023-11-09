@@ -2105,7 +2105,7 @@ impl Connection {
     #[cfg(feature = "power_sum")]
     pub fn recv_quack(
         &mut self,
-        quack: PowerSumQuack<u32>,
+        quack: PowerSumQuackU32,
         from: SocketAddr,
     ) -> Result<()> {
         if self.paths.len() != 1 {

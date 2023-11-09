@@ -101,7 +101,7 @@ use winapi::shared::ws2ipdef::SOCKADDR_IN6_LH_u;
 use crate::*;
 
 use bincode;
-use quack::PowerSumQuack;
+use quack::PowerSumQuackU32;
 #[cfg(feature = "strawman_a")]
 use quack::StrawmanAQuack;
 #[cfg(feature = "strawman_b")]
@@ -759,7 +759,7 @@ pub extern fn quiche_conn_recv_quack(
     }
     let buf = unsafe { slice::from_raw_parts_mut(quack_buf, quack_buf_len) };
     #[cfg(feature = "power_sum")]
-    let quack: PowerSumQuack<u32> = bincode::deserialize(&buf).unwrap();
+    let quack: PowerSumQuackU32 = bincode::deserialize(&buf).unwrap();
     #[cfg(feature = "strawman_a")]
     let quack: StrawmanAQuack = bincode::deserialize(&buf).unwrap();
     #[cfg(feature = "strawman_b")]
