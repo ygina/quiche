@@ -149,6 +149,15 @@ enum quiche_quack_style {
 // Set the style of quack to send and receive.
 void quiche_config_set_quack_style(quiche_config *config, enum quiche_quack_style style);
 
+// Sets the sidecar quACK threshold.
+void quiche_config_set_sidecar_threshold(quiche_config *config, size_t threshold);
+
+// Configures whether to send quACK reset messages.
+void quiche_config_enable_quack_reset(quiche_config *config, bool v);
+
+// Configures whether to send packets only if cwnd > mtu.
+void quiche_config_enable_sidecar_mtu(quiche_config *config, bool v);
+
 // Configures the given certificate chain.
 int quiche_config_load_cert_chain_from_pem_file(quiche_config *config,
                                                 const char *path);
@@ -236,15 +245,6 @@ enum quiche_cc_algorithm {
 
 // Sets the congestion control algorithm used.
 void quiche_config_set_cc_algorithm(quiche_config *config, enum quiche_cc_algorithm algo);
-
-// Sets the sidecar quACK threshold.
-void quiche_config_set_sidecar_threshold(quiche_config *config, size_t threshold);
-
-// Configures whether to send quACK reset messages.
-void quiche_config_enable_quack_reset(quiche_config *config, bool v);
-
-// Configures whether to send packets only if cwnd > mtu.
-void quiche_config_enable_sidecar_mtu(quiche_config *config, bool v);
 
 // Configures whether to use HyStart++.
 void quiche_config_enable_hystart(quiche_config *config, bool v);

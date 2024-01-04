@@ -164,6 +164,23 @@ pub extern fn quiche_config_set_quack_style(
 }
 
 #[no_mangle]
+pub extern fn quiche_config_set_sidecar_threshold(
+    config: &mut Config, threshold: size_t,
+) {
+    config.set_sidecar_threshold(threshold);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_enable_quack_reset(config: &mut Config, v: bool) {
+    config.enable_quack_reset(v);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_enable_sidecar_mtu(config: &mut Config, v: bool) {
+    config.enable_sidecar_mtu(v);
+}
+
+#[no_mangle]
 pub extern fn quiche_config_load_cert_chain_from_pem_file(
     config: &mut Config, path: *const c_char,
 ) -> c_int {
@@ -348,23 +365,6 @@ pub extern fn quiche_config_set_initial_congestion_window_packets(
     config: &mut Config, packets: size_t,
 ) {
     config.set_initial_congestion_window_packets(packets);
-}
-
-#[no_mangle]
-pub extern fn quiche_config_set_sidecar_threshold(
-    config: &mut Config, threshold: size_t,
-) {
-    config.set_sidecar_threshold(threshold);
-}
-
-#[no_mangle]
-pub extern fn quiche_config_enable_quack_reset(config: &mut Config, v: bool) {
-    config.enable_quack_reset(v);
-}
-
-#[no_mangle]
-pub extern fn quiche_config_enable_sidecar_mtu(config: &mut Config, v: bool) {
-    config.enable_sidecar_mtu(v);
 }
 
 #[no_mangle]
