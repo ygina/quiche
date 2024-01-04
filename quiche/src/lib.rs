@@ -804,7 +804,7 @@ impl Config {
 
             sidecar_threshold: 0,
             quack_reset: true,
-            sidecar_mtu: false,
+            sidecar_mtu: true,
             quack_style: QuackStyle::PowerSum,
         })
     }
