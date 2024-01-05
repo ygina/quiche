@@ -736,7 +736,7 @@ pub struct Config {
     disable_dcid_reuse: bool,
 
     sidecar_threshold: usize,
-    quack_reset: bool,
+    sidecar_reset: bool,
     sidecar_mtu: bool,
     quack_style: QuackStyle,
 }
@@ -803,7 +803,7 @@ impl Config {
             disable_dcid_reuse: false,
 
             sidecar_threshold: 0,
-            quack_reset: true,
+            sidecar_reset: true,
             sidecar_mtu: true,
             quack_style: QuackStyle::PowerSum,
         })
@@ -1226,7 +1226,7 @@ impl Config {
     ///
     /// The default value is `1`.
     pub fn sidecar_enable_reset(&mut self, v: bool) {
-        self.quack_reset = v;
+        self.sidecar_reset = v;
     }
 
     /// Sets the port at which to send sidecar reset messages to.
