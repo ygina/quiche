@@ -66,9 +66,6 @@ strawman_a = []
 # Echo sliding window of packet identifiers
 strawman_b = []
 
-# ACK reduction parameters instead of client-side retransmission.
-ack_reduction = []
-
 [package.metadata.docs.rs]
 no-default-features = true
 features = ["boringssl-boring-crate", "qlog"]

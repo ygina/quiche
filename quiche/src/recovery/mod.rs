@@ -88,26 +88,6 @@ const PACING_MULTIPLIER: f64 = 1.25;
 // an ACK.
 pub(super) const MAX_OUTSTANDING_NON_ACK_ELICITING: usize = 24;
 
-// Sidecar features
-
-// Client-side retransmission
-#[cfg(not(feature = "ack_reduction"))]
-const DEFAULT_NEAR_SUBPATH_RATIO: f64 = 1.0 / 26.0;
-#[cfg(not(feature = "ack_reduction"))]
-const SIDECAR_MARK_ACKED: bool = false;
-#[cfg(not(feature = "ack_reduction"))]
-const SIDECAR_RESET_THRESHOLD: Duration = Duration::from_millis(10);
-
-// ACK reduction
-#[cfg(feature = "ack_reduction")]
-const DEFAULT_NEAR_SUBPATH_RATIO: f64 = 25.0 / 26.0;
-#[cfg(feature = "ack_reduction")]
-const SIDECAR_MARK_ACKED: bool = true;
-#[cfg(feature = "ack_reduction")]
-const SIDECAR_RESET_THRESHOLD: Duration = Duration::from_millis(300);
-
-const SIDECAR_REORDER_THRESHOLD: usize = 3;
-
 #[derive(Debug)]
 pub struct DecodedQuack {
     #[cfg(feature = "power_sum")]
@@ -164,7 +144,7 @@ impl DecodedQuack {
     /// TCP's reordering threshold by not considering an index missing if there
     /// is a small number of received packets after that one before the suffix.
     #[cfg(feature = "power_sum")]
-    pub fn decode(&mut self, log: &[u32], now: Instant) -> usize {
+    pub fn decode(&mut self, log: &[u32], reorder_threshold: usize, now: Instant) -> usize {
         // We'd be calling this if there are missing packets in the suffix.
         if self.quack.count() == 0 {
             self.acked_ids = log.iter().map(|&id| id).collect();
@@ -195,10 +175,10 @@ impl DecodedQuack {
             }
         }
 
-        // If any of the SIDECAR_REORDER_THRESHOLD packets before the last
+        // If any of the `reorder_threshold` packets before the last
         // received packet are missing, wait to determine their fate.
-        let min_reorder_index = if log.len() > SIDECAR_REORDER_THRESHOLD {
-            log.len() - (SIDECAR_REORDER_THRESHOLD + 1)
+        let min_reorder_index = if log.len() > reorder_threshold {
+            log.len() - (reorder_threshold + 1)
         } else {
             0
         };
@@ -238,7 +218,7 @@ impl DecodedQuack {
                 self.missing_ids.insert(sidecar_id);
             }
         }
-        // self.num_reordered = std::cmp::min(SIDECAR_REORDER_THRESHOLD, self.missing_indexes.len());
+        // self.num_reordered = std::cmp::min(self.sidecar_reorder_threshold, self.missing_indexes.len());
         // for _ in 0..self.num_reordered {
         //     let index = self.missing_indexes.pop().unwrap();
         //     self.missing_ids.remove(&log[index]);
@@ -252,7 +232,7 @@ impl DecodedQuack {
     }
 
     #[cfg(feature = "strawman_b")]
-    pub fn decode(&mut self, log: &[u32], now: Instant) -> usize {
+    pub fn decode(&mut self, log: &[u32], reorder_threshold: usize, now: Instant) -> usize {
         let last_value = *self.quack.window.back().unwrap();
         let mut max_ack_index = log.len();
         let acked_ids = self.quack.window.iter().collect::<HashSet<_>>();
@@ -269,8 +249,8 @@ impl DecodedQuack {
             }
         }
 
-        let min_reorder_index = if max_ack_index > SIDECAR_REORDER_THRESHOLD {
-            max_ack_index - SIDECAR_REORDER_THRESHOLD
+        let min_reorder_index = if max_ack_index > reorder_threshold {
+            max_ack_index - reorder_threshold
         } else {
             0
         };
@@ -748,7 +728,7 @@ impl Recovery {
         // This time threshold should be long enough that if the host and proxy
         // are not in a valid state at this point, we can assume the previous
         // reset got lost.
-        if now - self.last_quack_reset > SIDECAR_RESET_THRESHOLD {
+        if now - self.last_quack_reset > self.sidecar_reset_threshold {
             #[cfg(feature = "debug")]
             println!("reset");
             #[cfg(feature = "debug")]
@@ -889,6 +869,7 @@ impl Recovery {
         let mut decoded = DecodedQuack::new(self.quack.clone().sub(quack));
         let drain_index = decoded.decode(
             &self.sidecar_log[..self.sidecar_next_log_index],
+            self.sidecar_reorder_threshold,
             now,
         );
 
@@ -907,12 +888,12 @@ impl Recovery {
 
         // Detect and mark acked packets, without removing them from the sent
         // packets list.
-        let (mut newly_acked, largest_newly_acked_sent_time) = if SIDECAR_MARK_ACKED {
+        let (mut newly_acked, largest_newly_acked_sent_time) = if self.sidecar_mark_acked {
             self.sidecar_mark_acked_packets(decoded.acked_ids, now, epoch)
         } else {
             (Vec::new(), now)
         };
-        if SIDECAR_MARK_ACKED && newly_acked.is_empty() {
+        if self.sidecar_mark_acked && newly_acked.is_empty() {
             return Ok((0, 0));
         }
 
@@ -971,7 +952,11 @@ impl Recovery {
     ) -> Result<(usize, usize)> {
         let now = Instant::now();
         let mut decoded = DecodedQuack::new(quack);
-        let drain_index = decoded.decode(&mut self.sidecar_log, now);
+        let drain_index = decoded.decode(
+            &mut self.sidecar_log,
+            self.sidecar_reorder_threshold,
+            now,
+        );
         #[cfg(feature = "debug")]
         println!("acked {:?} missing {:?} num_reordered {} drain {} {:?}", decoded.acked_ids, decoded.missing_ids, decoded.num_reordered, drain_index, &self.sidecar_log[..(decoded.missing_ids.len() + decoded.acked_ids.len() + decoded.num_reordered)]);
         self.on_quack_received_strawman(decoded, now, drain_index)
@@ -986,12 +971,12 @@ impl Recovery {
 
         // Detect and mark acked packets, without removing them from the sent
         // packets list.
-        let (mut newly_acked, largest_newly_acked_sent_time) = if SIDECAR_MARK_ACKED {
+        let (mut newly_acked, largest_newly_acked_sent_time) = if self.sidecar_mark_acked {
             self.sidecar_mark_acked_packets(decoded.acked_ids, now, epoch)
         } else {
             (Vec::new(), now)
         };
-        if SIDECAR_MARK_ACKED && newly_acked.is_empty() {
+        if self.sidecar_mark_acked && newly_acked.is_empty() {
             self.sidecar_log.drain(..drain_index);
             return Ok((0, 0));
         }
@@ -1004,14 +989,14 @@ impl Recovery {
 
         // Detect and mark lost packets, without removing them from the sent
         // packets list.
-        let (lost_bytes, lost_packets, largest_lost_pkt) = if SIDECAR_MARK_LOST_AND_RETX {
+        let (lost_bytes, lost_packets, largest_lost_pkt) = if self.sidecar_mark_lost_and_retx {
             self.sidecar_mark_lost_packets(decoded.missing_ids, now, epoch)
         } else {
             (0, 0, None)
         };
 
         // Update the congestion window. Notably, we do not drain packets.
-        if SIDECAR_UPDATE_CWND {
+        if self.sidecar_update_cwnd {
             self.sidecar_on_packets_lost(
                 now, epoch, lost_bytes, largest_lost_pkt);
             self.sidecar_on_packets_acked(
@@ -1143,7 +1128,7 @@ impl Recovery {
     ) {
         if let Some(pkt) = largest_lost_pkt {
             let metadata = QuackMetadata {
-                near_subpath_ratio: DEFAULT_NEAR_SUBPATH_RATIO,
+                near_subpath_ratio: self.sidecar_delay_ratio,
             };
 
             self.congestion_event(

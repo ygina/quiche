@@ -58,34 +58,14 @@ clean:
 sidecar:
 	cargo build --package quiche --release --features ffi,pkg-config-meta,qlog,power_sum
 
-.PHONY: retx_psum
-retx_psum:
-	cargo build --package quiche --release --features ffi,pkg-config-meta,qlog,power_sum
-
-.PHONY: retx_strawman_a
-retx_strawman_a:
+.PHONY: strawman_a
+strawman_a:
 	cargo build --package quiche --release --features ffi,pkg-config-meta,qlog,strawman_a
 
-.PHONY: retx_strawman_b
-retx_strawman_b:
+.PHONY: strawman_b
+strawman_b:
 	cargo build --package quiche --release --features ffi,pkg-config-meta,qlog,strawman_b
 
-.PHONY: retx_strawman_c
-retx_strawman_c:
+.PHONY: strawman_c
+strawman_c:
 	cargo build --package quiche --release --features ffi,pkg-config-meta,qlog,strawman_a
-
-.PHONY: ackr_psum
-ackr_psum:
-	cargo build --package quiche --release --features ffi,pkg-config-meta,qlog,power_sum,ack_reduction
-
-.PHONY: ackr_strawman_a
-ackr_strawman_a:
-	cargo build --package quiche --release --features ffi,pkg-config-meta,qlog,strawman_a,ack_reduction
-
-.PHONY: ackr_strawman_b
-ackr_strawman_b:
-	cargo build --package quiche --release --features ffi,pkg-config-meta,qlog,strawman_b,ack_reduction
-
-.PHONY: ackr_strawman_c
-ackr_strawman_c:
-	cargo build --package quiche --release --features ffi,pkg-config-meta,qlog,strawman_a,ack_reduction
