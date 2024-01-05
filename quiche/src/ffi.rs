@@ -164,15 +164,67 @@ pub extern fn quiche_config_set_quack_style(
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_sidecar_threshold(
-    config: &mut Config, threshold: size_t,
+pub extern fn quiche_config_sidecar_set_threshold(
+    config: &mut Config, threshold: usize,
 ) {
-    config.set_sidecar_threshold(threshold);
+    config.sidecar_set_threshold(threshold);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_enable_quack_reset(config: &mut Config, v: bool) {
-    config.enable_quack_reset(v);
+pub extern fn quiche_config_sidecar_enable_mark_acked(
+    config: &mut Config, v: bool,
+) {
+    config.sidecar_enable_mark_acked(v);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_sidecar_enable_mark_lost_and_retx(
+    config: &mut Config, v: bool,
+) {
+    config.sidecar_enable_mark_lost_and_retx(v);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_sidecar_enable_update_cwnd(
+    config: &mut Config, v: bool,
+) {
+    config.sidecar_enable_update_cwnd(v);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_sidecar_set_delay_ratio(
+    config: &mut Config, near_delay_ms: usize, e2e_delay_ms: usize,
+) {
+    let delay_ratio = (near_delay_ms as f64) / (e2e_delay_ms as f64);
+    config.sidecar_set_delay_ratio(delay_ratio);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_sidecar_enable_reset(
+    config: &mut Config, v: bool,
+) {
+    config.sidecar_enable_reset(v);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_sidecar_set_reset_port(
+    config: &mut Config, port: u16,
+) {
+    config.sidecar_set_reset_port(port);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_sidecar_set_reset_threshold(
+    config: &mut Config, ms: u64,
+) {
+    config.sidecar_set_reset_threshold(ms);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_sidecar_set_reorder_threshold(
+    config: &mut Config, pkts: usize,
+) {
+    config.sidecar_set_reorder_threshold(pkts);
 }
 
 #[no_mangle]

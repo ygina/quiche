@@ -1181,17 +1181,75 @@ impl Config {
         self.quack_style = style;
     }
 
-    /// Sets the sidecar quACK threshold.
-    pub fn set_sidecar_threshold(&mut self, threshold: usize) {
+    /// Sets the sidecar power sum quACK threshold.
+    ///
+    /// The default value is `0`, which indicates the sidecar is disabled.
+    pub fn sidecar_set_threshold(&mut self, threshold: usize) {
         quack::global_config_set_max_power_sum_threshold(threshold);
         self.sidecar_threshold = threshold;
     }
 
-    /// Configures whether to send quACK reset messages.
+    /// Configures whether the sidecar uses quACKs to consider packets to be received
+    /// by the data receiver and to advance the flow control window.
     ///
-    /// The default value is `true`.
-    pub fn enable_quack_reset(&mut self, v: bool) {
+    /// The default value is `0`.
+    pub fn sidecar_enable_mark_acked(&mut self, v: bool) {
+        unimplemented!();
+    }
+
+    /// Configures whether the sidecar uses quACKs to consider packets to be lost by
+    /// the data receiver and to retransmit them.
+    ///
+    /// The default value is `1`.
+    pub fn sidecar_enable_mark_lost_and_retx(&mut self, v: bool) {
+        unimplemented!();
+    }
+
+    /// Configures whether the sidecar uses quACKs to update the congestion window
+    /// in response to detected loss.
+    ///
+    /// The default value is `1`.
+    pub fn sidecar_enable_update_cwnd(&mut self, v: bool) {
+        unimplemented!();
+    }
+
+    /// Sets the estimated ratio of the near delay (between the data sender and
+    /// the proxy) to the end-to-end delay (between the data sender and
+    /// receiver), to use for path-aware congestion control.
+    ///
+    /// The default value is `1.0 / 26.0`.
+    pub fn sidecar_set_delay_ratio(&mut self, delay_ratio: f64) {
+        unimplemented!();
+    }
+
+    /// Configures whether to send sidecar reset messages.
+    ///
+    /// The default value is `1`.
+    pub fn sidecar_enable_reset(&mut self, v: bool) {
         self.quack_reset = v;
+    }
+
+    /// Sets the port at which to send sidecar reset messages to.
+    ///
+    /// The default value is `1234`.
+    pub fn sidecar_set_reset_port(&mut self, port: u16) {
+        unimplemented!();
+    }
+
+    /// Sets the reset threshold between invalid quACKs at which to send another
+    /// sidecar reset message, in ms.
+    ///
+    /// The default value is `10`.
+    pub fn sidecar_set_reset_threshold(&mut self, ms: u64) {
+        unimplemented!();
+    }
+
+    /// Sets the reordering threshold for sidecar loss detection, in number of
+    /// packets.
+    ///
+    /// The default value is `3`.
+    pub fn sidecar_set_reorder_threshold(&mut self, pkts: usize) {
+        unimplemented!();
     }
 
     /// Configures whether to send packets only if cwnd > mtu.
