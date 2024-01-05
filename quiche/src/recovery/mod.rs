@@ -106,9 +106,6 @@ const SIDECAR_MARK_ACKED: bool = true;
 #[cfg(feature = "ack_reduction")]
 const SIDECAR_RESET_THRESHOLD: Duration = Duration::from_millis(300);
 
-const SIDECAR_RESET_PORT: u16 = 1234;
-const SIDECAR_MARK_LOST_AND_RETX: bool = true;
-const SIDECAR_UPDATE_CWND: bool = true;
 const SIDECAR_REORDER_THRESHOLD: usize = 3;
 
 #[derive(Debug)]
@@ -396,8 +393,14 @@ pub struct Recovery {
     quack: PowerSumQuackU32,
 
     sidecar: bool,
+    sidecar_mark_acked: bool,
+    sidecar_mark_lost_and_retx: bool,
+    sidecar_update_cwnd: bool,
+    sidecar_delay_ratio: f64,
 
     sidecar_reset: bool,
+    sidecar_reset_port: u16,
+    sidecar_reset_threshold: Duration,
 
     sidecar_epoch: u8,
     last_decoded_quack_count: u32,
@@ -412,6 +415,8 @@ pub struct Recovery {
 
     sidecar_next_log_index: usize,
     sidecar_log: Vec<u32>,
+
+    sidecar_reorder_threshold: usize,
 }
 
 pub struct RecoveryConfig {
@@ -420,10 +425,17 @@ pub struct RecoveryConfig {
     cc_ops: &'static CongestionControlOps,
     hystart: bool,
     pacing: bool,
-    sidecar_threshold: usize,
-    sidecar_reset: bool,
     max_pacing_rate: Option<u64>,
     initial_congestion_window_packets: usize,
+    sidecar_threshold: usize,
+    sidecar_mark_acked: bool,
+    sidecar_mark_lost_and_retx: bool,
+    sidecar_update_cwnd: bool,
+    sidecar_delay_ratio: f64,
+    sidecar_reset: bool,
+    sidecar_reset_port: u16,
+    sidecar_reset_threshold: Duration,
+    sidecar_reorder_threshold: usize,
 }
 
 impl RecoveryConfig {
@@ -434,11 +446,18 @@ impl RecoveryConfig {
             cc_ops: config.cc_algorithm.into(),
             hystart: config.hystart,
             pacing: config.pacing,
-            sidecar_threshold: config.sidecar_threshold,
-            sidecar_reset: config.sidecar_reset,
             max_pacing_rate: config.max_pacing_rate,
             initial_congestion_window_packets: config
                 .initial_congestion_window_packets,
+            sidecar_threshold: config.sidecar_threshold,
+            sidecar_mark_acked: config.sidecar_mark_acked,
+            sidecar_mark_lost_and_retx: config.sidecar_mark_lost_and_retx,
+            sidecar_update_cwnd: config.sidecar_update_cwnd,
+            sidecar_delay_ratio: config.sidecar_delay_ratio,
+            sidecar_reset: config.sidecar_reset,
+            sidecar_reset_port: config.sidecar_reset_port,
+            sidecar_reset_threshold: config.sidecar_reset_threshold,
+            sidecar_reorder_threshold: config.sidecar_reorder_threshold,
         }
     }
 }
@@ -548,14 +567,20 @@ impl Recovery {
             initial_congestion_window_packets: recovery_config
                 .initial_congestion_window_packets,
 
-            sidecar: recovery_config.sidecar_threshold > 0,
-
-            sidecar_reset: recovery_config.sidecar_reset,
-
             quack: PowerSumQuack::new(recovery_config.sidecar_threshold),
 
-            last_decoded_quack_count: 0,
+            sidecar: recovery_config.sidecar_threshold > 0,
+            sidecar_mark_acked: recovery_config.sidecar_mark_acked,
+            sidecar_mark_lost_and_retx: recovery_config.sidecar_mark_lost_and_retx,
+            sidecar_update_cwnd: recovery_config.sidecar_update_cwnd,
+            sidecar_delay_ratio: recovery_config.sidecar_delay_ratio,
 
+            sidecar_reset: recovery_config.sidecar_reset,
+            sidecar_reset_port: recovery_config.sidecar_reset_port,
+            sidecar_reset_threshold: recovery_config.sidecar_reset_threshold,
+
+            sidecar_epoch: 0,
+            last_decoded_quack_count: 0,
             last_quack_reset: Instant::now(),
 
             #[cfg(feature = "debug")]
@@ -567,11 +592,10 @@ impl Recovery {
             #[cfg(feature = "debug")]
             stats_max_quack_reset: Duration::from_millis(1),
 
-            sidecar_epoch: 0,
-
             sidecar_next_log_index: 0,
-
             sidecar_log: vec![],
+
+            sidecar_reorder_threshold: recovery_config.sidecar_reorder_threshold,
         }
     }
 
@@ -738,7 +762,7 @@ impl Recovery {
             self.sidecar_epoch += 1;
             let sock = UdpSocket::bind("0.0.0.0:0")
                 .map_err(|_| crate::Error::BadQuackResetSocket)?;
-            addr.set_port(SIDECAR_RESET_PORT);
+            addr.set_port(self.sidecar_reset_port);
             sock.send_to(&[self.sidecar_epoch], addr)
                 .map_err(|_| crate::Error::BadQuackResetSocket)?;
 
@@ -900,14 +924,14 @@ impl Recovery {
 
         // Detect and mark lost packets, without removing them from the sent
         // packets list.
-        let (lost_bytes, lost_packets, largest_lost_pkt) = if SIDECAR_MARK_LOST_AND_RETX {
+        let (lost_bytes, lost_packets, largest_lost_pkt) = if self.sidecar_mark_lost_and_retx {
             self.sidecar_mark_lost_packets(decoded.missing_ids, now, epoch)
         } else {
             (0, 0, None)
         };
 
         // Update the congestion window. Notably, we do not drain packets.
-        if SIDECAR_UPDATE_CWND {
+        if self.sidecar_update_cwnd {
             self.sidecar_on_packets_lost(
                 now, epoch, lost_bytes, largest_lost_pkt);
             self.sidecar_on_packets_acked(

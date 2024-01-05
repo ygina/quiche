@@ -736,7 +736,16 @@ pub struct Config {
     disable_dcid_reuse: bool,
 
     sidecar_threshold: usize,
+    sidecar_mark_acked: bool,
+    sidecar_mark_lost_and_retx: bool,
+    sidecar_update_cwnd: bool,
+    sidecar_delay_ratio: f64,
+
     sidecar_reset: bool,
+    sidecar_reset_port: u16,
+    sidecar_reset_threshold: time::Duration,
+
+    sidecar_reorder_threshold: usize,
     sidecar_mtu: bool,
     quack_style: QuackStyle,
 }
@@ -803,7 +812,16 @@ impl Config {
             disable_dcid_reuse: false,
 
             sidecar_threshold: 0,
+            sidecar_mark_acked: false,
+            sidecar_mark_lost_and_retx: true,
+            sidecar_update_cwnd: true,
+            sidecar_delay_ratio: 1.0 / 26.0,
+
             sidecar_reset: true,
+            sidecar_reset_port: 1234,
+            sidecar_reset_threshold: time::Duration::from_millis(10),
+
+            sidecar_reorder_threshold: 3,
             sidecar_mtu: true,
             quack_style: QuackStyle::PowerSum,
         })
@@ -1194,7 +1212,7 @@ impl Config {
     ///
     /// The default value is `0`.
     pub fn sidecar_enable_mark_acked(&mut self, v: bool) {
-        unimplemented!();
+        self.sidecar_mark_acked = v;
     }
 
     /// Configures whether the sidecar uses quACKs to consider packets to be lost by
@@ -1202,7 +1220,7 @@ impl Config {
     ///
     /// The default value is `1`.
     pub fn sidecar_enable_mark_lost_and_retx(&mut self, v: bool) {
-        unimplemented!();
+        self.sidecar_mark_lost_and_retx = v;
     }
 
     /// Configures whether the sidecar uses quACKs to update the congestion window
@@ -1210,7 +1228,7 @@ impl Config {
     ///
     /// The default value is `1`.
     pub fn sidecar_enable_update_cwnd(&mut self, v: bool) {
-        unimplemented!();
+        self.sidecar_update_cwnd = v;
     }
 
     /// Sets the estimated ratio of the near delay (between the data sender and
@@ -1219,7 +1237,7 @@ impl Config {
     ///
     /// The default value is `1.0 / 26.0`.
     pub fn sidecar_set_delay_ratio(&mut self, delay_ratio: f64) {
-        unimplemented!();
+        self.sidecar_delay_ratio = delay_ratio;
     }
 
     /// Configures whether to send sidecar reset messages.
@@ -1233,7 +1251,7 @@ impl Config {
     ///
     /// The default value is `1234`.
     pub fn sidecar_set_reset_port(&mut self, port: u16) {
-        unimplemented!();
+        self.sidecar_reset_port = port;
     }
 
     /// Sets the reset threshold between invalid quACKs at which to send another
@@ -1241,7 +1259,7 @@ impl Config {
     ///
     /// The default value is `10`.
     pub fn sidecar_set_reset_threshold(&mut self, ms: u64) {
-        unimplemented!();
+        self.sidecar_reset_threshold = time::Duration::from_millis(ms);
     }
 
     /// Sets the reordering threshold for sidecar loss detection, in number of
@@ -1249,7 +1267,7 @@ impl Config {
     ///
     /// The default value is `3`.
     pub fn sidecar_set_reorder_threshold(&mut self, pkts: usize) {
-        unimplemented!();
+        self.sidecar_reorder_threshold = pkts;
     }
 
     /// Configures whether to send packets only if cwnd > mtu.
