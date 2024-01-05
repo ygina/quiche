@@ -1183,6 +1183,7 @@ impl Config {
 
     /// Sets the sidecar quACK threshold.
     pub fn set_sidecar_threshold(&mut self, threshold: usize) {
+        quack::global_config_set_max_power_sum_threshold(threshold);
         self.sidecar_threshold = threshold;
     }
 
