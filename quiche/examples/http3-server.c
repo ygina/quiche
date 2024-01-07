@@ -459,6 +459,9 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                     case QUICHE_H3_EVENT_PRIORITY_UPDATE:
                         break;
 
+                    case QUICHE_H3_EVENT_DATAGRAM:
+                        break;
+
                     case QUICHE_H3_EVENT_GOAWAY: {
                         fprintf(stderr, "got GOAWAY\n");
                         break;
