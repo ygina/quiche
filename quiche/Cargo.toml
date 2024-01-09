@@ -45,6 +45,9 @@ fuzzing = []
 # Build and expose the FFI API.
 ffi = []
 
+# Benchmark cpu overhead at the host.
+cycles = []
+
 # Log the bytes in flight when it is updated.
 bytes_in_flight_log = []
 

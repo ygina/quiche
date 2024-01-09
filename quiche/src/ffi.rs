@@ -107,6 +107,13 @@ use quack::StrawmanAQuack;
 #[cfg(feature = "strawman_b")]
 use quack::StrawmanBQuack;
 
+// The first index in the slice is the number of ACKs/quACKS received.
+// The second index is the total number of cycles spent processing ACKs/quACKs.
+#[cfg(feature = "cycles")]
+static mut CYCLES_ACK: [u64; 2] = [0; 2];
+#[cfg(feature = "cycles")]
+static mut CYCLES_QUACK: [u64; 2] = [0; 2];
+
 #[no_mangle]
 pub extern fn quiche_version() -> *const u8 {
     static VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "\0");
@@ -809,6 +816,10 @@ pub extern fn quiche_conn_recv_quack(
     if conn.is_null() {
         return;
     }
+
+    #[cfg(feature = "cycles")]
+    let t1 = unsafe { core::arch::x86_64::_rdtsc() };
+
     let buf = unsafe { slice::from_raw_parts_mut(quack_buf, quack_buf_len) };
     #[cfg(feature = "power_sum")]
     let quack: PowerSumQuackU32 = bincode::deserialize(&buf).unwrap();
@@ -819,6 +830,18 @@ pub extern fn quiche_conn_recv_quack(
     let conn: &mut Connection = unsafe { &mut *conn };
     let from = std_addr_from_c(addr, addr_len);
     conn.recv_quack(quack, from).unwrap();
+
+    #[cfg(feature = "cycles")]
+    unsafe {
+        let t2 = core::arch::x86_64::_rdtsc();
+        CYCLES_QUACK[0] += 1;
+        CYCLES_QUACK[1] += t2 - t1;
+
+        if CYCLES_QUACK[0] % 100 == 0 {
+            println!("{} cycles/quack ({} samples)", CYCLES_QUACK[1] / CYCLES_QUACK[0], CYCLES_QUACK[0]);
+            println!("{} cycles/ack ({} samples)", CYCLES_ACK[1] / CYCLES_ACK[0], CYCLES_ACK[0]);
+        }
+    }
 }
 
 #[no_mangle]
@@ -829,13 +852,24 @@ pub extern fn quiche_conn_recv(
         panic!("The provided buffer is too large");
     }
 
+    #[cfg(feature = "cycles")]
+    let t1 = unsafe { core::arch::x86_64::_rdtsc() };
     let buf = unsafe { slice::from_raw_parts_mut(buf, buf_len) };
 
-    match conn.recv(buf, info.into()) {
+    let res = match conn.recv(buf, info.into()) {
         Ok(v) => v as ssize_t,
 
         Err(e) => e.to_c(),
+    };
+
+    #[cfg(feature = "cycles")]
+    unsafe {
+        let t2 = core::arch::x86_64::_rdtsc();
+        CYCLES_ACK[0] += 1;
+        CYCLES_ACK[1] += t2 - t1;
     }
+
+    res
 }
 
 #[repr(C)]

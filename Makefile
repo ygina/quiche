@@ -58,6 +58,10 @@ clean:
 sidecar:
 	cargo build --package quiche --release --features ffi,pkg-config-meta,qlog,power_sum
 
+.PHONY: cycles
+cycles:
+	cargo build --package quiche --release --features ffi,pkg-config-meta,qlog,power_sum,cycles
+
 .PHONY: strawman_a
 strawman_a:
 	cargo build --package quiche --release --features ffi,pkg-config-meta,qlog,strawman_a
