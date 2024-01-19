@@ -57,8 +57,8 @@ cwnd_log = []
 # Log the sidecar identifier when it is inserted in a quACK.
 quack_log = []
 
-# Debug logging when quacks are received
-debug = []
+# General debug logging about resets and processing during a quack.
+debug = ["bytes_in_flight_log", "cwnd_log", "quack_log"]
 
 # Power sum quack
 power_sum = []
