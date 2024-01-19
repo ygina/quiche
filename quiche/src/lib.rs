@@ -567,11 +567,8 @@ pub enum Error {
     /// Error in key update.
     KeyUpdate,
 
-    /// Sidecar is enabled while there are multiple paths.
-    SidecarMultiplePaths,
-
-    /// Failed to send a quACK reset message.
-    BadQuackResetSocket,
+    /// Sidecar-related error.
+    Sidecar,
 }
 
 impl Error {
@@ -611,8 +608,7 @@ impl Error {
             Error::IdLimit => -17,
             Error::OutOfIdentifiers => -18,
             Error::KeyUpdate => -19,
-            Error::SidecarMultiplePaths => -20,
-            Error::BadQuackResetSocket => -21,
+            Error::Sidecar => -20,
         }
     }
 }
@@ -2186,7 +2182,7 @@ impl Connection {
         from: SocketAddr,
     ) -> Result<()> {
         if self.paths.len() != 1 {
-            return Err(Error::SidecarMultiplePaths);
+            return Err(Error::Sidecar);
         }
         let path = self.paths.get_active_mut()?;
         let (lost_packets, lost_bytes) =
@@ -2205,7 +2201,7 @@ impl Connection {
         from: SocketAddr,
     ) -> Result<()> {
         if self.paths.len() != 1 {
-            return Err(Error::SidecarMultiplePaths);
+            return Err(Error::Sidecar);
         }
         let path = self.paths.get_active_mut()?;
         let (lost_packets, lost_bytes) =
@@ -2224,7 +2220,7 @@ impl Connection {
         from: SocketAddr,
     ) -> Result<()> {
         if self.paths.len() != 1 {
-            return Err(Error::SidecarMultiplePaths);
+            return Err(Error::Sidecar);
         }
         let path = self.paths.get_active_mut()?;
         let (lost_packets, lost_bytes) =

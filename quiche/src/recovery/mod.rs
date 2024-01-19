@@ -741,10 +741,10 @@ impl Recovery {
             // the proxy is at the same epoch in order to decode quacks.
             self.sidecar_epoch += 1;
             let sock = UdpSocket::bind("0.0.0.0:0")
-                .map_err(|_| crate::Error::BadQuackResetSocket)?;
+                .map_err(|_| crate::Error::Sidecar)?;
             addr.set_port(self.sidecar_reset_port);
             sock.send_to(&[self.sidecar_epoch], addr)
-                .map_err(|_| crate::Error::BadQuackResetSocket)?;
+                .map_err(|_| crate::Error::Sidecar)?;
 
             // Reset internal quack state
             self.last_quack_reset = now;
