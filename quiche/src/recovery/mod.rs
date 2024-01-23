@@ -751,6 +751,18 @@ impl Recovery {
             }
         }
 
+        // We can't decode the quACK if the difference in the number of packets
+        // sent and received exceeds the threshold. Send a RESET packet to the
+        // proxy to resynchronize. The host keeps resending RESET packets with
+        // the same quack epoch in response to each quack until it receives a
+        // quack that it can decode.
+        let threshold = self.quack.threshold() as u32;
+        if self.quack.count() > quack.count() + threshold {
+            #[cfg(feature = "debug")]
+            println!("exceeded quack threshold {} > {}", self.quack.count() - quack.count(), threshold);
+            return Err(crate::Error::Sidecar);
+        }
+
         // Either the counts overflowed, or we sent a RESET packet that hasn't
         // been synchronized at the proxy yet. Either way, send a RESET if it
         // has been more than an RTT (of the quack subpath).
@@ -758,19 +770,6 @@ impl Recovery {
             #[cfg(feature = "debug")]
             println!("overflowed or sender hasn't processed reset, expected {} <= {}",
                 quack.count(), self.quack.count());
-            return Err(crate::Error::Sidecar);
-        }
-
-        // We can't decode the quACK if the difference in the number of packets
-        // sent and received exceeds the threshold. Send a RESET packet to the
-        // proxy to resynchronize. The host keeps resending RESET packets with
-        // the same quack epoch in response to each quack until it receives a
-        // quack that it can decode.
-        let threshold = self.quack.threshold();
-        let missing = self.quack.count() - quack.count();
-        if missing as usize > threshold {
-            #[cfg(feature = "debug")]
-            println!("exceeded quack threshold {} > {}", missing, threshold);
             return Err(crate::Error::Sidecar);
         }
 
@@ -794,7 +793,7 @@ impl Recovery {
 
         // We "drain" packets here without going through quack decoding.
         // If the log was already empty, then it must be that missing == 0.
-        if missing == 0 && self.sidecar_next_log_index == self.sidecar_log.len() {
+        if quack.count() == self.quack.count() && self.sidecar_next_log_index == self.sidecar_log.len() {
             self.sidecar_log = vec![];
             self.sidecar_next_log_index = 0;
             return Ok((0, 0));
