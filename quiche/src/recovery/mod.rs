@@ -88,7 +88,7 @@ const PACING_MULTIPLIER: f64 = 1.25;
 // an ACK.
 pub(super) const MAX_OUTSTANDING_NON_ACK_ELICITING: usize = 24;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct DecodedQuack {
     // In increasing order.
     pub missing_indexes: Vec<usize>,
@@ -109,21 +109,13 @@ impl DecodedQuack {
         // We'd be calling this if there are missing packets in the suffix.
         if quack.count() == 0 {
             return Ok(DecodedQuack {
-                missing_indexes: Default::default(),
-                missing_ids: Default::default(),
                 acked_ids: log.iter().copied().collect(),
-                num_reordered: 0,
                 drain_index: log.len(),
+                ..Default::default()
             });
         }
 
-        let mut decoded = DecodedQuack {
-            missing_indexes: Default::default(),
-            missing_ids: Default::default(),
-            acked_ids: Default::default(),
-            num_reordered: 0,
-            drain_index: 0,
-        };
+        let mut decoded = DecodedQuack::default();
 
         let coeffs = quack.to_coeffs();
         for (index, &id) in log.iter().enumerate() {
@@ -185,13 +177,7 @@ impl DecodedQuack {
         log: &[u32],
         now: Instant,
     ) -> Result<Self> {
-        let mut decoded = DecodedQuack {
-            missing_indexes: Default::default(),
-            missing_ids: Default::default(),
-            acked_ids: Default::default(),
-            num_reordered: 0,
-            drain_index: 0,
-        };
+        let mut decoded = DecodedQuack::default();
 
         let mut max_ack_index = log.len();
         for (i, &sidecar_id) in log.iter().enumerate() {
@@ -215,13 +201,7 @@ impl DecodedQuack {
         reorder_threshold: usize,
         now: Instant,
     ) -> Result<Self> {
-        let mut decoded = DecodedQuack {
-            missing_indexes: Default::default(),
-            missing_ids: Default::default(),
-            acked_ids: Default::default(),
-            num_reordered: 0,
-            drain_index: 0,
-        };
+        let mut decoded = DecodedQuack::default();
 
         let last_value = *quack.window.back().unwrap();
         let mut max_ack_index = log.len();
