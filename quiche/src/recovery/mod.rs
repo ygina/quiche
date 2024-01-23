@@ -149,11 +149,7 @@ impl DecodedQuack {
             println!("quack_log {:?} {} (sidecar_detect_lost_packets)", _now, id);
         }
 
-        decoded.drain_index = if decoded.num_reordered == 0 {
-            log.len()
-        } else {
-            log.len() - decoded.num_reordered - 1
-        };
+        decoded.drain_index = log.len() - decoded.num_reordered;
         Ok(decoded)
     }
 
@@ -177,7 +173,7 @@ impl DecodedQuack {
         while let Some(&missing_index) = self.missing_indexes.last() {
             if missing_index >= min_reorder_index {
                 self.missing_indexes.pop();
-                self.num_reordered = log.len() - self.num_suffix - missing_index - 1;
+                self.num_reordered = log.len() - self.num_suffix - missing_index;
             } else {
                 break;
             }
@@ -234,11 +230,7 @@ impl DecodedQuack {
 
         decoded.num_suffix = log.len() - max_ack_index - 1;
         decoded.process_reordering(log, reorder_threshold);
-        decoded.drain_index = if decoded.num_reordered == 0 {
-            log.len() - decoded.num_suffix
-        } else {
-            log.len() - decoded.num_suffix - 1 - decoded.num_reordered
-        };
+        decoded.drain_index = log.len() - decoded.num_suffix - decoded.num_reordered;
         decoded.missing_ids = decoded.missing_indexes.iter().map(|&index| log[index]).collect();
         Ok(decoded)
     }
@@ -894,11 +886,7 @@ impl Recovery {
             self.quack.remove(self.sidecar_log[index]);
         }
         self.sidecar_log.drain(..decoded.drain_index);
-        self.sidecar_next_log_index = if decoded.num_reordered == 0 {
-            0
-        } else {
-            decoded.num_reordered + 1
-        };
+        self.sidecar_next_log_index = decoded.num_reordered;
 
         Ok((lost_packets, lost_bytes))
     }
