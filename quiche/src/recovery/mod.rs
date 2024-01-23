@@ -129,21 +129,6 @@ impl DecodedQuack {
         for (index, &id) in log.iter().enumerate() {
             if arithmetic::eval(&coeffs, id).value() == 0 {
                 decoded.missing_indexes.push(index);
-                if decoded.missing_ids.insert(id) {
-                    // It is not very likely that two packets have the same
-                    // identifier if they are truly different packets. It is
-                    // even less likely that of the packetes that go
-                    // missing, one of those has a duplicate in the log, or
-                    // that the duplicate is also missing. What happens in
-                    // this case is that it's possible we retransmit the
-                    // wrong the packet (the one with a duplicate
-                    // identifier), and the truly missing packet is
-                    // addressed in QUIC's end-to-end retransmission
-                    // mechanism. However, since the quACK polynomial
-                    // accounts for multiplicity in its roots, the math
-                    // stays sound.
-                    warn!("duplicate ID is missing: {:?}", id);
-                }
             } else {
                 decoded.acked_ids.insert(id);
             }
@@ -158,12 +143,27 @@ impl DecodedQuack {
         };
         while let Some(&missing_index) = decoded.missing_indexes.last() {
             if missing_index >= min_reorder_index {
-                decoded.missing_ids.remove(&log[missing_index]);
                 decoded.missing_indexes.pop();
                 decoded.num_reordered = log.len() - missing_index - 1;
             } else {
                 break;
             }
+        }
+
+        decoded.missing_ids = decoded.missing_indexes.iter().map(|&index| log[index]).collect();
+        if decoded.missing_ids.len() < decoded.missing_indexes.len() {
+            // It is very unlikely that two packets have the same
+            // identifier if they are truly different packets. In the
+            // rare case that a duplicate identifier represents
+            // different packets and not all the packets are missing,
+            // it is possible we spuriously retransmit the wrong packet,
+            // and the truly missing packet is later addressed in QUIC's
+            // end-to-end retransmission mechanism.
+            //
+            // In the more likely scenario the same packet was just
+            // sent multiple times, `missing_indexes` would include all
+            // of them.
+            warn!("duplicate ID is missing");
         }
 
         #[cfg(feature = "quack_log")]
@@ -201,10 +201,10 @@ impl DecodedQuack {
                 break;
             } else {
                 decoded.missing_indexes.push(i);
-                decoded.missing_ids.insert(sidecar_id);
             }
         }
         decoded.drain_index = max_ack_index + 1;
+        decoded.missing_ids = decoded.missing_indexes.iter().map(|&index| log[index]).collect();
         Ok(decoded)
     }
 
@@ -235,7 +235,6 @@ impl DecodedQuack {
                 }
             } else {
                 decoded.missing_indexes.push(i);
-                decoded.missing_ids.insert(sidecar_id);
             }
         }
 
@@ -246,7 +245,6 @@ impl DecodedQuack {
         };
         while let Some(&missing_index) = decoded.missing_indexes.last() {
             if missing_index >= min_reorder_index {
-                decoded.missing_ids.remove(&log[missing_index]);
                 decoded.missing_indexes.pop();
                 decoded.num_reordered = max_ack_index - missing_index;
             } else {
@@ -259,6 +257,7 @@ impl DecodedQuack {
         } else {
             max_ack_index - decoded.num_reordered
         };
+        decoded.missing_ids = decoded.missing_indexes.iter().map(|&index| log[index]).collect();
         Ok(decoded)
     }
 }
