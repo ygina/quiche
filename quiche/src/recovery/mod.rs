@@ -58,10 +58,7 @@ use quack::StrawmanAQuack;
 use quack::StrawmanBQuack;
 use smallvec::SmallVec;
 
-// // For the e2e loss detection timeout it's RRT * packet thresh
-// const SIDECAR_LINK2_LOSS_DELAY: Duration = Duration::from_millis(3);
-
-// // Loss Recovery
+// Loss Recovery
 const INITIAL_PACKET_THRESHOLD: u64 = 3;
 
 const MAX_PACKET_THRESHOLD: u64 = 20;
@@ -99,6 +96,13 @@ pub struct DecodedQuack {
 }
 
 impl DecodedQuack {
+    /// Finds which identifiers are represented in the quACK, given a log of
+    /// candidate identifiers (representing sent packets). Also finds which
+    /// identifiers in the log are missing from the quACK, and the indexes (in
+    /// sorted order) in the log of those missing identifiers.
+    ///
+    /// The number of missing identifiers must not exceed the quack threshold.
+    /// Assumes packets are reordered up to `reorder_threshold` packets.
     #[cfg(feature = "power_sum")]
     pub fn decode(
         quack: PowerSumQuackU32,
@@ -721,8 +725,9 @@ impl Recovery {
     ) -> Result<(usize, usize)> {
         let epoch = packet::Epoch::Application;
 
-        // Don't process the quack if it hasn't changed since the last one we
-        // received. Or if no packets have been received.
+        // Immediately return if we've already processed this quack.
+        // Cache the count of the last decoded quack to avoid duplicate work.
+        // Immediately return if no packets have been received.
         if self.last_decoded_quack_count == quack.count() || quack.count() == 0 {
             return Ok((0, 0));
         } else {
@@ -732,18 +737,6 @@ impl Recovery {
         // Add up to the last packet received to the sender's quack.
         while self.sidecar_next_log_index < self.sidecar_log.len() {
             let sidecar_id = self.sidecar_log[self.sidecar_next_log_index];
-            // If we send A,B,C, but with reordering the last values received
-            // are C,B,A we need to check if the last received value was
-            // previously reordered. Previously, we would insert everything
-            // in the log which could have caused us to eventually exceed the
-            // threshold.
-            //
-            // If we get a quack whose last value is A, but the client has
-            // received C,B,A, we also run into problems. We'd currently be
-            // unable to decode the quack (because we only insert up to C),
-            // and then reset. What we could do instead is insert threshold more
-            // packets every time, do it only we can't decode, etc. But maybe
-            // not worth it and easier to just reset.
             self.sidecar_next_log_index += 1;
             self.quack.insert(sidecar_id);
             if Some(sidecar_id) == quack.last_value() {
@@ -791,36 +784,6 @@ impl Recovery {
             println!("reset quack after {:?} (max {:?})", t, self.stats_max_quack_reset);
         }
 
-        // We "drain" packets here without going through quack decoding.
-        // If the log was already empty, then it must be that missing == 0.
-        if quack.count() == self.quack.count() && self.sidecar_next_log_index == self.sidecar_log.len() {
-            self.sidecar_log = vec![];
-            self.sidecar_next_log_index = 0;
-            return Ok((0, 0));
-        }
-
-        // Drain any packets from the start of the log that were sent more than
-        // let mut missing_ids = vec![];
-        // let mut num_lost_timer = 0;
-        // let mut num_lost_ack = 0;
-        // {
-        //     // let lost_send_time = Instant::now() - SIDECAR_LINK2_LOSS_DELAY;
-        //     // let mut last_index = 0;
-        //     // for (i, (id, time_sent, epoch)) in self.sidecar_log.iter().enumerate() {
-        //     //     if epoch != &packet::Epoch::Application {
-        //     //         break;
-        //     //     }
-        //     //     if time_sent > &lost_send_time {
-        //     //         last_index = i;
-        //     //         break;
-        //     //     }
-        //     //     missing_ids.push(*id);
-        //     //     self.quack.remove(*id);
-        //     //     num_lost_timer += 1;
-        //     // }
-        //     // self.sidecar_log.drain(..last_index);
-        // }
-
         // Find the missing packets that are not in the suffix.
         let decoded = DecodedQuack::decode(
             self.quack.clone().sub(quack),
@@ -859,14 +822,15 @@ impl Recovery {
         };
 
         // Detect and mark lost packets, without removing them from the sent
-        // packets list.
+        // packets list. These packets will be retransmitted.
         let (lost_bytes, lost_packets, largest_lost_pkt) = if self.sidecar_mark_lost_and_retx {
             self.sidecar_mark_lost_packets(decoded.missing_ids, now, epoch)
         } else {
             (0, 0, None)
         };
 
-        // Update the congestion window. Notably, we do not drain packets.
+        // Update the congestion window. Notably, we do not drain packets,
+        // in case they need to be retransmitted via the e2e mechanism.
         if self.sidecar_update_cwnd {
             self.sidecar_on_packets_lost(
                 now, epoch, lost_bytes, largest_lost_pkt);
@@ -875,7 +839,7 @@ impl Recovery {
         }
 
         // Everything we drain from the log has already been determined to
-        // be quacked or lost.
+        // be quacked or lost. Remove the lost packets from the quack.
         for index in decoded.missing_indexes {
             self.quack.remove(self.sidecar_log[index]);
         }
@@ -989,6 +953,8 @@ impl Recovery {
             if acked_ids.is_empty() {
                 break;
             }
+            // might have to wait for e2e ack if there is a duplicate
+            // are these always processed in the order they are in the log?
             if !acked_ids.remove(&unacked.sidecar_id) {
                 continue;
             }
@@ -1040,6 +1006,8 @@ impl Recovery {
             if missing_ids.is_empty() {
                 break;
             }
+            // might not retransmit right number of times if there is duplicate
+            // are these always processed in the order they are in the log?
             if !missing_ids.remove(&unacked.sidecar_id) {
                 continue;
             }
@@ -1052,7 +1020,7 @@ impl Recovery {
                 warn!("loss already detected for pkt {}", unacked.sidecar_id);
                 continue;
             }
-            // Retransmit missing packets
+            // Retransmit missing frames
             self.lost[epoch].extend(unacked.frames.drain(..));
             unacked.time_lost = Some(now);
             if unacked.in_flight {
@@ -1075,7 +1043,7 @@ impl Recovery {
         self.lost_count += lost_packets;
         self.bytes_in_flight = self.bytes_in_flight.saturating_sub(lost_bytes);
         #[cfg(feature = "bytes_in_flight_log")]
-        println!("bytes_in_flight {} {:?} (sidecar_mark_acked_packets)", self.bytes_in_flight, now);
+        println!("bytes_in_flight {} {:?} (sidecar_mark_lost_packets)", self.bytes_in_flight, now);
 
         (lost_bytes, lost_packets, largest_lost_pkt)
     }
