@@ -105,16 +105,16 @@ impl DecodedQuack {
         log: &[u32],
         reorder_threshold: usize,
         _now: Instant,
-    ) -> Self {
+    ) -> Result<Self> {
         // We'd be calling this if there are missing packets in the suffix.
         if quack.count() == 0 {
-            return DecodedQuack {
+            return Ok(DecodedQuack {
                 missing_indexes: Default::default(),
                 missing_ids: Default::default(),
                 acked_ids: log.iter().copied().collect(),
                 num_reordered: 0,
                 drain_index: log.len(),
-            };
+            });
         }
 
         let mut decoded = DecodedQuack {
@@ -176,11 +176,15 @@ impl DecodedQuack {
         } else {
             log.len() - decoded.num_reordered - 1
         };
-        decoded
+        Ok(decoded)
     }
 
     #[cfg(feature = "strawman_a")]
-    pub fn decode(quack: StrawmanAQuack, log: &[u32], now: Instant) -> Self {
+    pub fn decode(
+        quack: StrawmanAQuack,
+        log: &[u32],
+        now: Instant,
+    ) -> Result<Self> {
         let mut decoded = DecodedQuack {
             missing_indexes: Default::default(),
             missing_ids: Default::default(),
@@ -201,7 +205,7 @@ impl DecodedQuack {
             }
         }
         decoded.drain_index = max_ack_index + 1;
-        decoded
+        Ok(decoded)
     }
 
     #[cfg(feature = "strawman_b")]
@@ -210,7 +214,7 @@ impl DecodedQuack {
         log: &[u32],
         reorder_threshold: usize,
         now: Instant,
-    ) -> Self {
+    ) -> Result<Self> {
         let mut decoded = DecodedQuack {
             missing_indexes: Default::default(),
             missing_ids: Default::default(),
@@ -255,7 +259,7 @@ impl DecodedQuack {
         } else {
             max_ack_index - decoded.num_reordered
         };
-        decoded
+        Ok(decoded)
     }
 }
 
@@ -705,7 +709,7 @@ impl Recovery {
         self.pacer.send(sent_bytes, now);
     }
 
-    fn send_quack_reset(
+    pub fn send_quack_reset(
         &mut self, mut addr: SocketAddr, now: Instant,
     ) -> Result<()> {
         if !self.sidecar_reset {
@@ -745,8 +749,10 @@ impl Recovery {
 
     #[cfg(feature= "power_sum")]
     pub fn on_quack_received(
-        &mut self, quack: PowerSumQuackU32, from: SocketAddr,
+        &mut self, quack: PowerSumQuackU32, now: Instant,
     ) -> Result<(usize, usize)> {
+        let epoch = packet::Epoch::Application;
+
         // Don't process the quack if it hasn't changed since the last one we
         // received. Or if no packets have been received.
         if self.last_decoded_quack_count == quack.count() || quack.count() == 0 {
@@ -780,14 +786,11 @@ impl Recovery {
         // Either the counts overflowed, or we sent a RESET packet that hasn't
         // been synchronized at the proxy yet. Either way, send a RESET if it
         // has been more than an RTT (of the quack subpath).
-        let now = Instant::now();
-        let epoch = packet::Epoch::Application;
         if self.quack.count() < quack.count() {
             #[cfg(feature = "debug")]
             println!("overflowed or sender hasn't processed reset, expected {} <= {}",
                 quack.count(), self.quack.count());
-            self.send_quack_reset(from, now)?;
-            return Ok((0, 0));
+            return Err(crate::Error::Sidecar);
         }
 
         // We can't decode the quACK if the difference in the number of packets
@@ -800,8 +803,7 @@ impl Recovery {
         if missing as usize > threshold {
             #[cfg(feature = "debug")]
             println!("exceeded quack threshold {} > {}", missing, threshold);
-            self.send_quack_reset(from, now)?;
-            return Ok((0, 0));
+            return Err(crate::Error::Sidecar);
         }
 
         #[cfg(feature = "debug")]
@@ -858,7 +860,7 @@ impl Recovery {
             &self.sidecar_log[..self.sidecar_next_log_index],
             self.sidecar_reorder_threshold,
             now,
-        );
+        )?;
 
         #[cfg(feature = "debug")]
         if self.sidecar_epoch > 0 {
@@ -926,7 +928,7 @@ impl Recovery {
         &mut self, quack: StrawmanAQuack, _from: SocketAddr,
     ) -> Result<(usize, usize)> {
         let now = Instant::now();
-        let decoded = DecodedQuack::decode(quack, &self.sidecar_log, now);
+        let decoded = DecodedQuack::decode(quack, &self.sidecar_log, now)?;
         #[cfg(feature = "debug")]
         println!("acked {:?} missing {:?} num_reordered {} drain {} {:?}",
             decoded.acked_ids, decoded.missing_ids,
@@ -945,7 +947,7 @@ impl Recovery {
             &self.sidecar_log,
             self.sidecar_reorder_threshold,
             now,
-        );
+        )?;
         #[cfg(feature = "debug")]
         println!("acked {:?} missing {:?} num_reordered {} drain {} {:?}",
             decoded.acked_ids, decoded.missing_ids,

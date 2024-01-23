@@ -2185,11 +2185,18 @@ impl Connection {
             return Err(Error::Sidecar);
         }
         let path = self.paths.get_active_mut()?;
-        let (lost_packets, lost_bytes) =
-            path.recovery.on_quack_received(quack, from)?;
-        self.lost_count += lost_packets;
-        self.lost_bytes += lost_bytes as u64;
-        self.update_tx_cap();
+        let now = time::Instant::now();
+        match path.recovery.on_quack_received(quack, now) {
+            Ok((lost_packets, lost_bytes)) => {
+                self.lost_count += lost_packets;
+                self.lost_bytes += lost_bytes as u64;
+                self.update_tx_cap();
+            },
+            Err(_) => {
+                path.recovery.send_quack_reset(from, now)?;
+            }
+        };
+
         Ok(())
     }
 
