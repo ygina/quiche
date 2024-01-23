@@ -96,6 +96,7 @@ pub struct DecodedQuack {
     pub acked_ids: HashSet<u32>,
     pub drain_index: usize,
     pub num_reordered: usize,
+    pub num_suffix: usize,
 }
 
 impl DecodedQuack {
@@ -126,22 +127,7 @@ impl DecodedQuack {
             }
         }
 
-        // If any of the `reorder_threshold` packets before the last
-        // received packet are missing, wait to determine their fate.
-        let min_reorder_index = if log.len() > reorder_threshold {
-            log.len() - (reorder_threshold + 1)
-        } else {
-            0
-        };
-        while let Some(&missing_index) = decoded.missing_indexes.last() {
-            if missing_index >= min_reorder_index {
-                decoded.missing_indexes.pop();
-                decoded.num_reordered = log.len() - missing_index - 1;
-            } else {
-                break;
-            }
-        }
-
+        decoded.process_reordering(log, reorder_threshold);
         decoded.missing_ids = decoded.missing_indexes.iter().map(|&index| log[index]).collect();
         if decoded.missing_ids.len() < decoded.missing_indexes.len() {
             // It is very unlikely that two packets have the same
@@ -169,6 +155,33 @@ impl DecodedQuack {
             log.len() - decoded.num_reordered - 1
         };
         Ok(decoded)
+    }
+
+    /// If any of the `reorder_threshold` packets before the last received
+    /// packet are missing, wait to determine their fate.
+    ///
+    /// The following fields on self should already be determined:
+    /// - missing_indexes, num_suffix
+    ///
+    /// This function will set the following fields:
+    /// - num_reordered
+    fn process_reordering(
+        &mut self,
+        log: &[u32],
+        reorder_threshold: usize,
+    ) {
+        let min_reorder_index = {
+            let index = log.len() - self.num_suffix;
+            index - std::cmp::min(index, reorder_threshold + 1)
+        };
+        while let Some(&missing_index) = self.missing_indexes.last() {
+            if missing_index >= min_reorder_index {
+                self.missing_indexes.pop();
+                self.num_reordered = log.len() - self.num_suffix - missing_index - 1;
+            } else {
+                break;
+            }
+        }
     }
 
     #[cfg(feature = "strawman_a")]
@@ -210,6 +223,7 @@ impl DecodedQuack {
             if acked_ids.contains(&sidecar_id) {
                 decoded.acked_ids.insert(sidecar_id);
                 if sidecar_id == last_value {
+                    decoded.num_suffix = log.len() - 1 - i;
                     max_ack_index = i;
                     break;
                 }
@@ -218,24 +232,12 @@ impl DecodedQuack {
             }
         }
 
-        let min_reorder_index = if max_ack_index > reorder_threshold {
-            max_ack_index - reorder_threshold
-        } else {
-            0
-        };
-        while let Some(&missing_index) = decoded.missing_indexes.last() {
-            if missing_index >= min_reorder_index {
-                decoded.missing_indexes.pop();
-                decoded.num_reordered = max_ack_index - missing_index;
-            } else {
-                break;
-            }
-        }
-
+        decoded.num_suffix = log.len() - max_ack_index - 1;
+        decoded.process_reordering(log, reorder_threshold);
         decoded.drain_index = if decoded.num_reordered == 0 {
-            max_ack_index + 1
+            log.len() - decoded.num_suffix
         } else {
-            max_ack_index - decoded.num_reordered
+            log.len() - decoded.num_suffix - 1 - decoded.num_reordered
         };
         decoded.missing_ids = decoded.missing_indexes.iter().map(|&index| log[index]).collect();
         Ok(decoded)
