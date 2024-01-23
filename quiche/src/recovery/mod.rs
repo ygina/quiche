@@ -855,21 +855,20 @@ impl Recovery {
         }
 
         // Detect and mark acked packets, without removing them from the sent
-        // packets list.
-        let (mut newly_acked, largest_newly_acked_sent_time) = if self.sidecar_mark_acked {
-            self.sidecar_mark_acked_packets(decoded.acked_ids, now, epoch)
-        } else {
-            (Vec::new(), now)
-        };
-        if self.sidecar_mark_acked && newly_acked.is_empty() {
-            return Ok((0, 0));
-        }
-
-        if !newly_acked.is_empty() {
+        // packets list. This will advance the flow control window.
+        let mut newly_acked = if self.sidecar_mark_acked {
+            let (newly_acked, largest_newly_acked_sent_time) =
+                self.sidecar_mark_acked_packets(decoded.acked_ids, now, epoch);
+            if newly_acked.is_empty() {
+                return Ok((0, 0));
+            }
             let latest_rtt =
                 now.saturating_duration_since(largest_newly_acked_sent_time);
             self.update_rtt(latest_rtt, Duration::ZERO, now);
-        }
+            newly_acked
+        } else {
+            Vec::new()
+        };
 
         // Detect and mark lost packets, without removing them from the sent
         // packets list.
