@@ -111,7 +111,7 @@ impl DecodedQuack {
             return DecodedQuack {
                 missing_indexes: Default::default(),
                 missing_ids: Default::default(),
-                acked_ids: log.iter().map(|&id| id).collect(),
+                acked_ids: log.iter().copied().collect(),
                 num_reordered: 0,
                 drain_index: log.len(),
             };
@@ -926,7 +926,7 @@ impl Recovery {
         &mut self, quack: StrawmanAQuack, _from: SocketAddr,
     ) -> Result<(usize, usize)> {
         let now = Instant::now();
-        let decoded = DecodedQuack::decode(quack, &mut self.sidecar_log, now);
+        let decoded = DecodedQuack::decode(quack, &self.sidecar_log, now);
         #[cfg(feature = "debug")]
         println!("acked {:?} missing {:?} num_reordered {} drain {} {:?}",
             decoded.acked_ids, decoded.missing_ids,
@@ -942,7 +942,7 @@ impl Recovery {
         let now = Instant::now();
         let decoded = DecodedQuack::decode(
             quack,
-            &mut self.sidecar_log,
+            &self.sidecar_log,
             self.sidecar_reorder_threshold,
             now,
         );
