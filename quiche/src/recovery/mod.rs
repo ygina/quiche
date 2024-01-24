@@ -50,7 +50,7 @@ use qlog::events::EventData;
 
 use quack::{
     PowerSumQuack, PowerSumQuackU32,
-    arithmetic::{self, ModularArithmetic},
+    arithmetic::{self, ModularArithmetic, ModularInteger},
 };
 #[cfg(feature = "strawman_a")]
 use quack::StrawmanAQuack;
@@ -120,14 +120,33 @@ impl DecodedQuack {
         }
 
         let mut decoded = DecodedQuack::default();
-
-        let coeffs = quack.to_coeffs();
+        let mut coeffs = quack.to_coeffs();
         for (index, &id) in log.iter().enumerate() {
-            if arithmetic::eval(&coeffs, id).value() == 0 {
-                decoded.missing_indexes.push(index);
-            } else {
+            if coeffs.is_empty() || arithmetic::eval(&coeffs, id).value() != 0 {
                 decoded.acked_ids.insert(id);
+            } else {
+                // Divide the coefficients by the binomial representing the
+                // missing sidecar id
+                let mod_id = ModularInteger::<u32>::new(id);
+                if coeffs.len() == 1 {
+                    assert_eq!(coeffs.pop(), Some(mod_id.neg()));
+                } else {
+                    coeffs[0].add_assign(mod_id);
+                    for i in 1..coeffs.len() {
+                        let addend = coeffs[i-1].mul(mod_id);
+                        coeffs[i].add_assign(addend);
+                    }
+                    assert_eq!(coeffs.pop().unwrap().value(), 0);
+                }
+
+                // Track the missing id and its index in the log
+                decoded.missing_indexes.push(index);
             }
+        }
+
+        if !coeffs.is_empty() {
+            // unable to decode all missing packets
+            return Err(crate::Error::Sidecar);
         }
 
         // Don't consider any of the suffix packets to be missing.
