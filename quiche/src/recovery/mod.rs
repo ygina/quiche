@@ -182,12 +182,23 @@ impl DecodedQuack {
             let index = log.len() - self.num_suffix;
             index - std::cmp::min(index, reorder_threshold + 1)
         };
+        let mut reordered_missing_ids = HashSet::new();
         while let Some(&missing_index) = self.missing_indexes.last() {
             if missing_index >= min_reorder_index {
+                // TODO: remove with multiplicity
+                reordered_missing_ids.insert(log[missing_index]);
                 self.missing_indexes.pop();
+                // The last `num_reordered` packets in the log after the suffix
+                // have some reordering.
                 self.num_reordered = log.len() - self.num_suffix - missing_index;
             } else {
                 break;
+            }
+        }
+        for i in 0..self.num_reordered {
+            let sidecar_id = log[log.len() - self.num_suffix - i - 1];
+            if !reordered_missing_ids.contains(&sidecar_id) {
+                self.reordered_ack_ids.push(sidecar_id);
             }
         }
     }
@@ -196,20 +207,31 @@ impl DecodedQuack {
     pub fn decode(
         quack: StrawmanAQuack,
         log: &[u32],
+        reorder_threshold: usize,
+        reordered_ack_ids: &[u32],
         now: Instant,
     ) -> Result<Self> {
+        let mut expected_acked_ids = reordered_ack_ids.iter().copied().collect::<HashSet<_>>();
+        expected_acked_ids.insert(quack.sidecar_id);
         let mut decoded = DecodedQuack::default();
 
-        let mut max_ack_index = log.len();
         for (i, &sidecar_id) in log.iter().enumerate() {
-            if sidecar_id == quack.sidecar_id {
+            if expected_acked_ids.remove(&sidecar_id) {
                 decoded.acked_ids.insert(sidecar_id);
-                decoded.num_suffix = log.len() - 1 - i;
-                break;
+                if expected_acked_ids.is_empty() {
+                    decoded.num_suffix = log.len() - 1 - i;
+                    break;
+                }
             } else {
                 decoded.missing_indexes.push(i);
             }
         }
+
+        if !expected_acked_ids.is_empty() {
+            return Err(crate::Error::Sidecar);
+        }
+
+        decoded.process_reordering(log, reorder_threshold);
         decoded.missing_ids = decoded.missing_indexes.iter().map(|&index| log[index]).collect();
         Ok(decoded)
     }
@@ -219,27 +241,33 @@ impl DecodedQuack {
         quack: StrawmanBQuack,
         log: &[u32],
         reorder_threshold: usize,
+        reordered_ack_ids: &[u32],
         now: Instant,
     ) -> Result<Self> {
+        let mut expected_acked_ids = reordered_ack_ids.iter().copied().collect::<HashSet<_>>();
+        expected_acked_ids.insert(*quack.window.back().unwrap());
+        let maybe_late_ack_ids = quack.window.iter().collect::<HashSet<_>>();
+
         let mut decoded = DecodedQuack::default();
 
-        let last_value = *quack.window.back().unwrap();
-        let mut max_ack_index = log.len();
-        let acked_ids = quack.window.iter().collect::<HashSet<_>>();
         for (i, &sidecar_id) in log.iter().enumerate() {
-            if acked_ids.contains(&sidecar_id) {
+            if expected_acked_ids.remove(&sidecar_id) {
                 decoded.acked_ids.insert(sidecar_id);
-                if sidecar_id == last_value {
+                if expected_acked_ids.is_empty() {
                     decoded.num_suffix = log.len() - 1 - i;
-                    max_ack_index = i;
                     break;
                 }
+            } else if maybe_late_ack_ids.contains(&sidecar_id) {
+                decoded.acked_ids.insert(sidecar_id);
             } else {
                 decoded.missing_indexes.push(i);
             }
         }
 
-        decoded.num_suffix = log.len() - max_ack_index - 1;
+        if !expected_acked_ids.is_empty() {
+            return Err(crate::Error::Sidecar);
+        }
+
         decoded.process_reordering(log, reorder_threshold);
         decoded.missing_ids = decoded.missing_indexes.iter().map(|&index| log[index]).collect();
         Ok(decoded)
@@ -898,7 +926,13 @@ impl Recovery {
         &mut self, quack: StrawmanAQuack, _from: SocketAddr,
     ) -> Result<(usize, usize)> {
         let now = Instant::now();
-        let decoded = DecodedQuack::decode(quack, &self.sidecar_log, now)?;
+        let decoded = DecodedQuack::decode(
+            quack,
+            &self.sidecar_log,
+            self.sidecar_reorder_threshold,
+            &self.sidecar_reordered_ack_ids,
+            now,
+        )?;
         #[cfg(feature = "debug")]
         println!("acked {:?} missing {:?} num_reordered {} num_suffix {} {:?}",
             decoded.acked_ids, decoded.missing_ids,
@@ -917,6 +951,7 @@ impl Recovery {
             quack,
             &self.sidecar_log,
             self.sidecar_reorder_threshold,
+            &self.sidecar_reordered_ack_ids,
             now,
         )?;
         #[cfg(feature = "debug")]
@@ -972,6 +1007,7 @@ impl Recovery {
         // Everything we drain from the log has already been determined to
         // be quacked or lost.
         self.sidecar_log.drain(..drain_index);
+        self.sidecar_reordered_ack_ids = decoded.reordered_ack_ids;
 
         Ok((lost_packets, lost_bytes))
     }
