@@ -109,6 +109,7 @@ impl DecodedQuack {
         quack: PowerSumQuackU32,
         log: &[u32],
         reorder_threshold: usize,
+        reordered_ack_ids: &[u32],
         _now: Instant,
     ) -> Result<Self> {
         // We'd be calling this if there are missing packets in the suffix.
@@ -159,7 +160,7 @@ impl DecodedQuack {
             }
         }
 
-        decoded.process_reordering(log, reorder_threshold);
+        decoded.process_reordering(log, reorder_threshold, reordered_ack_ids);
         decoded.missing_ids = decoded.missing_indexes.iter().map(|&index| log[index]).collect();
         if decoded.missing_ids.len() < decoded.missing_indexes.len() {
             // It is very unlikely that two packets have the same
@@ -196,24 +197,38 @@ impl DecodedQuack {
         &mut self,
         log: &[u32],
         reorder_threshold: usize,
+        reordered_ack_ids: &[u32],
     ) {
+        // Find the minimum log index in which reordering could have occurred.
         let min_reorder_index = {
             let index = log.len() - self.num_suffix;
             index - std::cmp::min(index, reorder_threshold + 1)
         };
+
+        // Of the possibly reordered packets, find which ones were acked.
+        // The ones that may be missing will wait until the next quack to
+        // determine their fate.
         let mut reordered_missing_ids = HashSet::new();
         while let Some(&missing_index) = self.missing_indexes.last() {
             if missing_index >= min_reorder_index {
-                // TODO: remove with multiplicity
-                reordered_missing_ids.insert(log[missing_index]);
+                reordered_missing_ids.insert(log[missing_index]);  // multiplicity
                 self.missing_indexes.pop();
-                // The last `num_reordered` packets in the log after the suffix
+                // The last `num_reordered` packets in the log before the suffix
                 // have some reordering.
                 self.num_reordered = log.len() - self.num_suffix - missing_index;
             } else {
                 break;
             }
         }
+
+        // These packets were acked last time but possibly reordered, so they
+        // should not be considered newly acked.
+        for id in reordered_ack_ids {
+            self.acked_ids.remove(id);  // multiplicity
+        }
+
+        // Save the possibly reordered acked packets for next time so they
+        // aren't considereod newly acked.
         for i in 0..self.num_reordered {
             let sidecar_id = log[log.len() - self.num_suffix - i - 1];
             if !reordered_missing_ids.contains(&sidecar_id) {
@@ -230,6 +245,9 @@ impl DecodedQuack {
         reordered_ack_ids: &[u32],
         now: Instant,
     ) -> Result<Self> {
+        // The reordered ack ids are required because unlike the power sum
+        // quack, the strawman quack does not cumulatively include previously
+        // quacked packets.
         let mut expected_acked_ids = reordered_ack_ids.iter().copied().collect::<HashSet<_>>();
         expected_acked_ids.insert(quack.sidecar_id);
         let mut decoded = DecodedQuack::default();
@@ -250,7 +268,7 @@ impl DecodedQuack {
             return Err(crate::Error::Sidecar);
         }
 
-        decoded.process_reordering(log, reorder_threshold);
+        decoded.process_reordering(log, reorder_threshold, reordered_ack_ids);
         decoded.missing_ids = decoded.missing_indexes.iter().map(|&index| log[index]).collect();
         Ok(decoded)
     }
@@ -263,6 +281,9 @@ impl DecodedQuack {
         reordered_ack_ids: &[u32],
         now: Instant,
     ) -> Result<Self> {
+        // The reordered ack ids are required because unlike the power sum
+        // quack, the strawman quack does not cumulatively include previously
+        // quacked packets.
         let mut expected_acked_ids = reordered_ack_ids.iter().copied().collect::<HashSet<_>>();
         expected_acked_ids.insert(*quack.window.back().unwrap());
         let maybe_late_ack_ids = quack.window.iter().collect::<HashSet<_>>();
@@ -287,7 +308,7 @@ impl DecodedQuack {
             return Err(crate::Error::Sidecar);
         }
 
-        decoded.process_reordering(log, reorder_threshold);
+        decoded.process_reordering(log, reorder_threshold, reordered_ack_ids);
         decoded.missing_ids = decoded.missing_indexes.iter().map(|&index| log[index]).collect();
         Ok(decoded)
     }
@@ -864,17 +885,13 @@ impl Recovery {
         }
 
         // Find the missing packets that are not in the suffix.
-        let mut decoded = DecodedQuack::decode(
+        let decoded = DecodedQuack::decode(
             self.quack.clone().sub(quack),
             &self.sidecar_log[..next_log_index],
             self.sidecar_reorder_threshold,
+            &self.sidecar_reordered_ack_ids,
             now,
         )?;
-        // These packets were ACKed last time but possibly reordered,
-        // so they should not be considered newly ACKed.
-        for id in &self.sidecar_reordered_ack_ids {
-            decoded.acked_ids.remove(id);
-        }
 
         #[cfg(feature = "debug")]
         if self.sidecar_epoch > 0 {
