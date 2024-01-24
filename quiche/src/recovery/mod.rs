@@ -91,6 +91,7 @@ pub struct DecodedQuack {
     pub missing_indexes: Vec<usize>,
     pub missing_ids: HashSet<u32>,
     pub acked_ids: HashSet<u32>,
+    pub reordered_ack_ids: Vec<u32>,
     pub num_reordered: usize,
     pub num_suffix: usize,
 }
@@ -129,6 +130,16 @@ impl DecodedQuack {
             }
         }
 
+        // Don't consider any of the suffix packets to be missing.
+        while let Some(&missing_index) = decoded.missing_indexes.last() {
+            if missing_index == log.len() - decoded.num_suffix - 1 {
+                decoded.missing_indexes.pop();
+                decoded.num_suffix += 1;
+            } else {
+                break;
+            }
+        }
+
         decoded.process_reordering(log, reorder_threshold);
         decoded.missing_ids = decoded.missing_indexes.iter().map(|&index| log[index]).collect();
         if decoded.missing_ids.len() < decoded.missing_indexes.len() {
@@ -161,7 +172,7 @@ impl DecodedQuack {
     /// - missing_indexes, num_suffix
     ///
     /// This function will set the following fields:
-    /// - num_reordered
+    /// - num_reordered, reordered_ack_ids
     fn process_reordering(
         &mut self,
         log: &[u32],
@@ -356,7 +367,7 @@ pub struct Recovery {
     #[cfg(feature = "debug")]
     stats_max_quack_reset: Duration,
 
-    sidecar_next_log_index: usize,
+    sidecar_reordered_ack_ids: Vec<u32>,
     sidecar_log: Vec<u32>,
 
     sidecar_reorder_threshold: usize,
@@ -535,7 +546,7 @@ impl Recovery {
             #[cfg(feature = "debug")]
             stats_max_quack_reset: Duration::from_millis(1),
 
-            sidecar_next_log_index: 0,
+            sidecar_reordered_ack_ids: vec![],
             sidecar_log: vec![],
 
             sidecar_reorder_threshold: recovery_config.sidecar_reorder_threshold,
@@ -714,7 +725,7 @@ impl Recovery {
             self.quack = PowerSumQuack::new(self.quack.threshold());
             self.last_decoded_quack_count = 0;
             self.sidecar_log = vec![];
-            self.sidecar_next_log_index = 0;
+            self.sidecar_reordered_ack_ids = vec![];
         }
         Ok(())
     }
@@ -734,12 +745,16 @@ impl Recovery {
             self.last_decoded_quack_count = quack.count();
         }
 
-        // Add up to the last packet received to the sender's quack.
-        while self.sidecar_next_log_index < self.sidecar_log.len() {
-            let sidecar_id = self.sidecar_log[self.sidecar_next_log_index];
-            self.sidecar_next_log_index += 1;
+        // Add up to the `last_value()` received at the sender.
+        let mut next_log_index = 0;
+        while next_log_index < self.sidecar_log.len() {
+            let sidecar_id = self.sidecar_log[next_log_index];
+            next_log_index += 1;
             self.quack.insert(sidecar_id);
             if Some(sidecar_id) == quack.last_value() {
+                // If this condition isn't met in the loop, eventually the
+                // quack will fail to decode the packets in this quack are not
+                // a subset of our own quack, and we'll reset.
                 break;
             }
         }
@@ -754,6 +769,23 @@ impl Recovery {
             #[cfg(feature = "debug")]
             println!("exceeded quack threshold {} > {}", self.quack.count() - quack.count(), threshold);
             return Err(crate::Error::Sidecar);
+        }
+
+        // Add `self.sidecar_reorder_threshold` more packets up to the quack
+        // threshold to account for reordering.
+        // Note if adding `self.sidecar_reorder_threshold` packets would exceed
+        // the quack threshold, and there was reordering, then we would get an
+        // error when decoding the quack and reset.
+        for _ in 0..self.sidecar_reorder_threshold {
+            if self.quack.count() == quack.count() + threshold {
+                break;
+            }
+            if next_log_index >= self.sidecar_log.len() {
+                break;
+            }
+            let sidecar_id = self.sidecar_log[next_log_index];
+            next_log_index += 1;
+            self.quack.insert(sidecar_id);
         }
 
         // Either the counts overflowed, or we sent a RESET packet that hasn't
@@ -785,12 +817,17 @@ impl Recovery {
         }
 
         // Find the missing packets that are not in the suffix.
-        let decoded = DecodedQuack::decode(
+        let mut decoded = DecodedQuack::decode(
             self.quack.clone().sub(quack),
-            &self.sidecar_log[..self.sidecar_next_log_index],
+            &self.sidecar_log[..next_log_index],
             self.sidecar_reorder_threshold,
             now,
         )?;
+        // These packets were ACKed last time but possibly reordered,
+        // so they should not be considered newly ACKed.
+        for id in &self.sidecar_reordered_ack_ids {
+            decoded.acked_ids.remove(id);
+        }
 
         #[cfg(feature = "debug")]
         if self.sidecar_epoch > 0 {
@@ -839,12 +876,19 @@ impl Recovery {
         }
 
         // Everything we drain from the log has already been determined to
-        // be quacked or lost. Remove the lost packets from the quack.
+        // be quacked or lost. Remove the lost packets from the quack. Remove
+        // any potentially in-flight or reordered packets from the quack, but
+        // keep reordered ACKed packets around so they aren't considered
+        // newly ACKed next time.
         for index in decoded.missing_indexes {
             self.quack.remove(self.sidecar_log[index]);
         }
-        self.sidecar_log.drain(..(self.sidecar_next_log_index - decoded.num_suffix - decoded.num_reordered));
-        self.sidecar_next_log_index = decoded.num_reordered;
+        for _ in 0..(decoded.num_suffix + decoded.num_reordered) {
+            next_log_index -= 1;
+            self.quack.remove(self.sidecar_log[next_log_index]);
+        }
+        self.sidecar_log.drain(..next_log_index);
+        self.sidecar_reordered_ack_ids = decoded.reordered_ack_ids;
 
         Ok((lost_packets, lost_bytes))
     }
