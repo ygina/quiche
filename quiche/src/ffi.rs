@@ -817,7 +817,11 @@ pub extern fn quiche_conn_recv_quack(
     }
 
     #[cfg(feature = "cycles")]
-    let t1 = unsafe { core::arch::x86_64::_rdtsc() };
+    let t1 = unsafe {
+        core::arch::x86_64::_mm_lfence();
+        core::arch::x86_64::_rdtsc()
+    };
+    unsafe { core::arch::x86_64::_mm_lfence(); }
 
     let buf = unsafe { slice::from_raw_parts_mut(quack_buf, quack_buf_len) };
     #[cfg(feature = "power_sum")]
@@ -832,13 +836,14 @@ pub extern fn quiche_conn_recv_quack(
 
     #[cfg(feature = "cycles")]
     unsafe {
+        core::arch::x86_64::_mm_lfence();
         let t2 = core::arch::x86_64::_rdtsc();
+        core::arch::x86_64::_mm_lfence();
         CYCLES_QUACK[0] += 1;
         CYCLES_QUACK[1] += t2 - t1;
 
         if CYCLES_QUACK[0] % 100 == 0 {
             println!("{} cycles/quack ({} samples)", CYCLES_QUACK[1] / CYCLES_QUACK[0], CYCLES_QUACK[0]);
-            println!("{} cycles/ack ({} samples)", CYCLES_ACK[1] / CYCLES_ACK[0], CYCLES_ACK[0]);
         }
     }
 }
@@ -852,7 +857,11 @@ pub extern fn quiche_conn_recv(
     }
 
     #[cfg(feature = "cycles")]
-    let t1 = unsafe { core::arch::x86_64::_rdtsc() };
+    let t1 = unsafe {
+        core::arch::x86_64::_mm_lfence();
+        core::arch::x86_64::_rdtsc()
+    };
+    unsafe { core::arch::x86_64::_mm_lfence(); }
     let buf = unsafe { slice::from_raw_parts_mut(buf, buf_len) };
 
     let res = match conn.recv(buf, info.into()) {
@@ -863,9 +872,15 @@ pub extern fn quiche_conn_recv(
 
     #[cfg(feature = "cycles")]
     unsafe {
+        core::arch::x86_64::_mm_lfence();
         let t2 = core::arch::x86_64::_rdtsc();
+        core::arch::x86_64::_mm_lfence();
         CYCLES_ACK[0] += 1;
         CYCLES_ACK[1] += t2 - t1;
+
+        if CYCLES_ACK[0] % 1000 == 0 {
+            println!("{} cycles/ack ({} samples)", CYCLES_ACK[1] / CYCLES_ACK[0], CYCLES_ACK[0]);
+        }
     }
 
     res
