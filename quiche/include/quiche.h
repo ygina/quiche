@@ -149,44 +149,44 @@ enum quiche_quack_style {
 // Sets the style of quack to send and receive: TODO.
 void quiche_config_set_quack_style(quiche_config *config, enum quiche_quack_style style);
 
-// Sets the sidecar power sum quACK threshold. (default: 0)
-void quiche_config_sidecar_set_threshold(quiche_config *config, size_t threshold);
+// Sets the sidekick power sum quACK threshold. (default: 0)
+void quiche_config_sidekick_set_threshold(quiche_config *config, size_t threshold);
 
-// Configures whether the sidecar uses quACKs to consider packets to be received
+// Configures whether the sidekick uses quACKs to consider packets to be received
 // by the data receiver and to advance the flow control window. (default: 0)
-void quiche_config_sidecar_enable_mark_acked(quiche_config *config, bool v);
+void quiche_config_sidekick_enable_mark_acked(quiche_config *config, bool v);
 
-// Configures whether the sidecar uses quACKs to consider packets to be lost by
+// Configures whether the sidekick uses quACKs to consider packets to be lost by
 // the data receiver and to retransmit them. (default: 1)
-void quiche_config_sidecar_enable_mark_lost_and_retx(quiche_config *config, bool v);
+void quiche_config_sidekick_enable_mark_lost_and_retx(quiche_config *config, bool v);
 
-// Configures whether the sidecar uses quACKs to update the congestion window
+// Configures whether the sidekick uses quACKs to update the congestion window
 // in response to detected loss. (default: 1)
-void quiche_config_sidecar_enable_update_cwnd(quiche_config *config, bool v);
+void quiche_config_sidekick_enable_update_cwnd(quiche_config *config, bool v);
 
 // Sets the estimated near delay (between the data sender and the proxy) and
 // end-to-end delay (between the data sender and receiver), in the same units,
 // to set the ratio used for path-aware congestion control. (default: 1 and 26)
-void quiche_config_sidecar_set_delay_ratio(quiche_config *config,
+void quiche_config_sidekick_set_delay_ratio(quiche_config *config,
                                            size_t near_delay_ms,
                                            size_t e2e_delay_ms);
 
-// Configures whether to send sidecar reset messages. (default: 1)
-void quiche_config_sidecar_enable_reset(quiche_config *config, bool v);
+// Configures whether to send sidekick reset messages. (default: 1)
+void quiche_config_sidekick_enable_reset(quiche_config *config, bool v);
 
-// Sets the port at which to send sidecar reset messages to. (default: 1234)
-void quiche_config_sidecar_set_reset_port(quiche_config *config, uint16_t port);
+// Sets the port at which to send sidekick reset messages to. (default: 1234)
+void quiche_config_sidekick_set_reset_port(quiche_config *config, uint16_t port);
 
 // Sets the reset threshold between invalid quACKs at which to send another
-// sidecar reset message, in ms. (default: 10)
-void quiche_config_sidecar_set_reset_threshold(quiche_config *config, uint64_t ms);
+// sidekick reset message, in ms. (default: 10)
+void quiche_config_sidekick_set_reset_threshold(quiche_config *config, uint64_t ms);
 
-// Sets the reordering threshold for sidecar loss detection, in number of
+// Sets the reordering threshold for sidekick loss detection, in number of
 // packets. (default: 3)
-void quiche_config_sidecar_set_reorder_threshold(quiche_config *config, size_t pkts);
+void quiche_config_sidekick_set_reorder_threshold(quiche_config *config, size_t pkts);
 
 // Configures whether to send packets only if cwnd > mtu. (default: 1)
-void quiche_config_enable_sidecar_mtu(quiche_config *config, bool v);
+void quiche_config_enable_sidekick_mtu(quiche_config *config, bool v);
 
 // Configures the given certificate chain.
 int quiche_config_load_cert_chain_from_pem_file(quiche_config *config,
@@ -379,7 +379,7 @@ typedef struct {
     socklen_t to_len;
 } quiche_recv_info;
 
-// Processes quACKs received from a sidecar.
+// Processes quACKs received from a sidekick.
 void quiche_conn_recv_quack(quiche_conn *conn,
                             uint8_t *quack_buf, size_t quack_buf_len,
                             const struct sockaddr *addr, size_t addr_len);

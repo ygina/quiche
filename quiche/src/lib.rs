@@ -416,7 +416,7 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 
 use quack::*;
-use sidecar::ID_OFFSET;
+use sidekick::ID_OFFSET;
 use smallvec::SmallVec;
 
 /// The current QUIC wire version.
@@ -567,8 +567,8 @@ pub enum Error {
     /// Error in key update.
     KeyUpdate,
 
-    /// Sidecar-related error.
-    Sidecar,
+    /// Sidekick-related error.
+    Sidekick,
 }
 
 impl Error {
@@ -608,7 +608,7 @@ impl Error {
             Error::IdLimit => -17,
             Error::OutOfIdentifiers => -18,
             Error::KeyUpdate => -19,
-            Error::Sidecar => -20,
+            Error::Sidekick => -20,
         }
     }
 }
@@ -731,18 +731,18 @@ pub struct Config {
 
     disable_dcid_reuse: bool,
 
-    sidecar_threshold: usize,
-    sidecar_mark_acked: bool,
-    sidecar_mark_lost_and_retx: bool,
-    sidecar_update_cwnd: bool,
-    sidecar_delay_ratio: f64,
+    sidekick_threshold: usize,
+    sidekick_mark_acked: bool,
+    sidekick_mark_lost_and_retx: bool,
+    sidekick_update_cwnd: bool,
+    sidekick_delay_ratio: f64,
 
-    sidecar_reset: bool,
-    sidecar_reset_port: u16,
-    sidecar_reset_threshold: time::Duration,
+    sidekick_reset: bool,
+    sidekick_reset_port: u16,
+    sidekick_reset_threshold: time::Duration,
 
-    sidecar_reorder_threshold: usize,
-    sidecar_mtu: bool,
+    sidekick_reorder_threshold: usize,
+    sidekick_mtu: bool,
     quack_style: QuackStyle,
 }
 
@@ -807,18 +807,18 @@ impl Config {
 
             disable_dcid_reuse: false,
 
-            sidecar_threshold: 0,
-            sidecar_mark_acked: false,
-            sidecar_mark_lost_and_retx: true,
-            sidecar_update_cwnd: true,
-            sidecar_delay_ratio: 1.0 / 26.0,
+            sidekick_threshold: 0,
+            sidekick_mark_acked: false,
+            sidekick_mark_lost_and_retx: true,
+            sidekick_update_cwnd: true,
+            sidekick_delay_ratio: 1.0 / 26.0,
 
-            sidecar_reset: true,
-            sidecar_reset_port: 1234,
-            sidecar_reset_threshold: time::Duration::from_millis(10),
+            sidekick_reset: true,
+            sidekick_reset_port: 1234,
+            sidekick_reset_threshold: time::Duration::from_millis(10),
 
-            sidecar_reorder_threshold: 3,
-            sidecar_mtu: true,
+            sidekick_reorder_threshold: 3,
+            sidekick_mtu: true,
             quack_style: QuackStyle::PowerSum,
         })
     }
@@ -1195,36 +1195,36 @@ impl Config {
         self.quack_style = style;
     }
 
-    /// Sets the sidecar power sum quACK threshold.
+    /// Sets the sidekick power sum quACK threshold.
     ///
-    /// The default value is `0`, which indicates the sidecar is disabled.
-    pub fn sidecar_set_threshold(&mut self, threshold: usize) {
+    /// The default value is `0`, which indicates the sidekick is disabled.
+    pub fn sidekick_set_threshold(&mut self, threshold: usize) {
         quack::global_config_set_max_power_sum_threshold(threshold);
-        self.sidecar_threshold = threshold;
+        self.sidekick_threshold = threshold;
     }
 
-    /// Configures whether the sidecar uses quACKs to consider packets to be received
+    /// Configures whether the sidekick uses quACKs to consider packets to be received
     /// by the data receiver and to advance the flow control window.
     ///
     /// The default value is `0`.
-    pub fn sidecar_enable_mark_acked(&mut self, v: bool) {
-        self.sidecar_mark_acked = v;
+    pub fn sidekick_enable_mark_acked(&mut self, v: bool) {
+        self.sidekick_mark_acked = v;
     }
 
-    /// Configures whether the sidecar uses quACKs to consider packets to be lost by
+    /// Configures whether the sidekick uses quACKs to consider packets to be lost by
     /// the data receiver and to retransmit them.
     ///
     /// The default value is `1`.
-    pub fn sidecar_enable_mark_lost_and_retx(&mut self, v: bool) {
-        self.sidecar_mark_lost_and_retx = v;
+    pub fn sidekick_enable_mark_lost_and_retx(&mut self, v: bool) {
+        self.sidekick_mark_lost_and_retx = v;
     }
 
-    /// Configures whether the sidecar uses quACKs to update the congestion window
+    /// Configures whether the sidekick uses quACKs to update the congestion window
     /// in response to detected loss.
     ///
     /// The default value is `1`.
-    pub fn sidecar_enable_update_cwnd(&mut self, v: bool) {
-        self.sidecar_update_cwnd = v;
+    pub fn sidekick_enable_update_cwnd(&mut self, v: bool) {
+        self.sidekick_update_cwnd = v;
     }
 
     /// Sets the estimated ratio of the near delay (between the data sender and
@@ -1232,45 +1232,45 @@ impl Config {
     /// receiver), to use for path-aware congestion control.
     ///
     /// The default value is `1.0 / 26.0`.
-    pub fn sidecar_set_delay_ratio(&mut self, delay_ratio: f64) {
-        self.sidecar_delay_ratio = delay_ratio;
+    pub fn sidekick_set_delay_ratio(&mut self, delay_ratio: f64) {
+        self.sidekick_delay_ratio = delay_ratio;
     }
 
-    /// Configures whether to send sidecar reset messages.
+    /// Configures whether to send sidekick reset messages.
     ///
     /// The default value is `1`.
-    pub fn sidecar_enable_reset(&mut self, v: bool) {
-        self.sidecar_reset = v;
+    pub fn sidekick_enable_reset(&mut self, v: bool) {
+        self.sidekick_reset = v;
     }
 
-    /// Sets the port at which to send sidecar reset messages to.
+    /// Sets the port at which to send sidekick reset messages to.
     ///
     /// The default value is `1234`.
-    pub fn sidecar_set_reset_port(&mut self, port: u16) {
-        self.sidecar_reset_port = port;
+    pub fn sidekick_set_reset_port(&mut self, port: u16) {
+        self.sidekick_reset_port = port;
     }
 
     /// Sets the reset threshold between invalid quACKs at which to send another
-    /// sidecar reset message, in ms.
+    /// sidekick reset message, in ms.
     ///
     /// The default value is `10`.
-    pub fn sidecar_set_reset_threshold(&mut self, ms: u64) {
-        self.sidecar_reset_threshold = time::Duration::from_millis(ms);
+    pub fn sidekick_set_reset_threshold(&mut self, ms: u64) {
+        self.sidekick_reset_threshold = time::Duration::from_millis(ms);
     }
 
-    /// Sets the reordering threshold for sidecar loss detection, in number of
+    /// Sets the reordering threshold for sidekick loss detection, in number of
     /// packets.
     ///
     /// The default value is `3`.
-    pub fn sidecar_set_reorder_threshold(&mut self, pkts: usize) {
-        self.sidecar_reorder_threshold = pkts;
+    pub fn sidekick_set_reorder_threshold(&mut self, pkts: usize) {
+        self.sidekick_reorder_threshold = pkts;
     }
 
     /// Configures whether to send packets only if cwnd > mtu.
     ///
     /// The default value is `false`.
-    pub fn enable_sidecar_mtu(&mut self, v: bool) {
-        self.sidecar_mtu = v;
+    pub fn enable_sidekick_mtu(&mut self, v: bool) {
+        self.sidekick_mtu = v;
     }
 
     /// Configures whether to enable HyStart++.
@@ -1546,7 +1546,7 @@ pub struct Connection {
     disable_dcid_reuse: bool,
 
     /// Send packets only if cwnd > mtu.
-    sidecar_mtu: bool,
+    sidekick_mtu: bool,
 
     /// A resusable buffer used by Recovery
     newly_acked: Vec<recovery::Acked>,
@@ -1990,7 +1990,7 @@ impl Connection {
 
             disable_dcid_reuse: config.disable_dcid_reuse,
 
-            sidecar_mtu: config.sidecar_mtu,
+            sidekick_mtu: config.sidekick_mtu,
 
             newly_acked: Vec::new(),
         };
@@ -2174,7 +2174,7 @@ impl Connection {
         Ok(())
     }
 
-    /// Process quACKs received from a sidecar.
+    /// Process quACKs received from a sidekick.
     #[cfg(feature = "power_sum")]
     pub fn recv_quack(
         &mut self,
@@ -2182,7 +2182,7 @@ impl Connection {
         from: SocketAddr,
     ) -> Result<()> {
         if self.paths.len() != 1 {
-            return Err(Error::Sidecar);
+            return Err(Error::Sidekick);
         }
         let path = self.paths.get_active_mut()?;
         let now = time::Instant::now();
@@ -2200,7 +2200,7 @@ impl Connection {
         Ok(())
     }
 
-    /// Process quACKs received from a sidecar.
+    /// Process quACKs received from a sidekick.
     #[cfg(feature = "strawman_b")]
     pub fn recv_quack(
         &mut self,
@@ -2208,7 +2208,7 @@ impl Connection {
         from: SocketAddr,
     ) -> Result<()> {
         if self.paths.len() != 1 {
-            return Err(Error::Sidecar);
+            return Err(Error::Sidekick);
         }
         let path = self.paths.get_active_mut()?;
         let (lost_packets, lost_bytes) =
@@ -2219,7 +2219,7 @@ impl Connection {
         Ok(())
     }
 
-    /// Process quACKs received from a sidecar.
+    /// Process quACKs received from a sidekick.
     #[cfg(feature = "strawman_a")]
     pub fn recv_quack(
         &mut self,
@@ -2227,7 +2227,7 @@ impl Connection {
         from: SocketAddr,
     ) -> Result<()> {
         if self.paths.len() != 1 {
-            return Err(Error::Sidecar);
+            return Err(Error::Sidekick);
         }
         let path = self.paths.get_active_mut()?;
         let (lost_packets, lost_bytes) =
@@ -3421,7 +3421,7 @@ impl Connection {
                 break;
             }
 
-            // Sidecar: Don't coalesce packets at all. The only packets that
+            // Sidekick: Don't coalesce packets at all. The only packets that
             // were being coalesced were the first two Initial packets anyway.
             // Payload packets can't be coalesced because they have short
             // headers and thus no Length field.
@@ -3772,7 +3772,7 @@ impl Connection {
         // Limit output packet size by congestion window size.
         let cwnd_available = cwnd_available
             .saturating_sub(left_before_packing_ack_frame - left); /* bytes consumed by ACK frames */
-        if self.sidecar_mtu {
+        if self.sidekick_mtu {
             if cwnd_available < left {
                 left = 0;
             }
@@ -4493,11 +4493,11 @@ impl Connection {
             aead,
         )?;
 
-        // The sidecar identifier is the first 4 bytes = 32 bits of the
+        // The sidekick identifier is the first 4 bytes = 32 bits of the
         // encrypted QUIC payload following the short header.
         let ip_hdr_len = 42;
         let base_index = ID_OFFSET - ip_hdr_len;
-        let sidecar_id = u32::from_be_bytes([
+        let sidekick_id = u32::from_be_bytes([
             out[base_index],
             out[base_index+1],
             out[base_index+2],
@@ -4505,11 +4505,11 @@ impl Connection {
         ]);
 
         let sent_pkt = recovery::Sent {
-            sidecar_id,
+            sidekick_id,
             pkt_num: pn,
             frames,
             time_sent: now,
-            time_acked_sidecar: None,
+            time_acked_sidekick: None,
             time_acked: None,
             time_lost: None,
             size: if ack_eliciting { written } else { 0 },

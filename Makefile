@@ -54,8 +54,8 @@ clean:
 		$(DOCKER) rmi -f $$id; \
 	done
 
-.PHONY: sidecar
-sidecar:
+.PHONY: sidekick
+sidekick:
 	cargo build --package quiche --release --features ffi,pkg-config-meta,qlog,power_sum
 
 .PHONY: cycles

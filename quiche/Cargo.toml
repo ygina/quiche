@@ -54,7 +54,7 @@ bytes_in_flight_log = []
 # Log the congestion window when it is updated in cubic.
 cwnd_log = []
 
-# Log the sidecar identifier when it is inserted in a quACK.
+# Log the sidekick identifier when it is inserted in a quACK.
 quack_log = []
 
 # General debug logging about resets and processing during a quack.
@@ -81,7 +81,7 @@ cmake = "0.1"
 either = { version = "1.5.2", default-features = false }
 bincode = "1.3.3"
 quack = { path = "../../../quack" }
-sidecar = { path = "../../../sidecar" }
+sidekick = { path = "../../../sidekick" }
 log = { version = "0.4", features = ["std"] }
 libc = "0.2"
 libm = "0.2"
