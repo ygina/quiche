@@ -62,6 +62,10 @@ sidekick:
 cycles:
 	cargo build --package quiche --release --features ffi,pkg-config-meta,qlog,power_sum,cycles
 
+.PHONY: cwnd
+cwnd:
+	cargo build --package quiche --release --features ffi,pkg-config-meta,qlog,power_sum,cwnd_log
+
 .PHONY: strawman_a
 strawman_a:
 	cargo build --package quiche --release --features ffi,pkg-config-meta,qlog,strawman_a
